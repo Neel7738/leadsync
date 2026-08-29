@@ -1,0 +1,186 @@
+# ════════════════════════════════════════════════════════════════
+# AI Sales Follow-Up Agent — Docker Compose
+# ════════════════════════════════════════════════════════════════
+#
+# Quick start:
+#   cp ../.env.example ../.env   # edit with your keys
+#   docker compose up -d
+#
+# Services:
+#   API          :8000   FastAPI backend
+#   Dashboard    :8501   Streamlit rep dashboard
+#   Redis        :6379   Priority queue backend
+#   PostgreSQL   :5432   Conversation history & audit trail
+#   Prometheus   :9090   Metrics collection
+#   Grafana      :3000   Metrics visualization
+#
+# ──────────────────────────────────────────────────────────────
+
+services:
+
+  # ── FastAPI Application ────────────────────────────────────
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: sfa-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - WORKERS=${WORKERS:-2}
+      # LLM
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      # Email
+      - IMAP_HOST=${IMAP_HOST:-imap.gmail.com}
+      - IMAP_PORT=${IMAP_PORT:-993}
+      - IMAP_USERNAME=${IMAP_USERNAME:-}
+      - IMAP_PASSWORD=${IMAP_PASSWORD:-}
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - EMAIL_SENDING_DOMAIN=${EMAIL_SENDING_DOMAIN:-sales@yourcompany.com}
+      # Queue
+      - USE_REDIS=${USE_REDIS:-true}
+      - REDIS_URL=redis://redis:6379
+      # Database
+      - DATABASE_URL=${DATABASE_URL:-postgresql://sfa:sfa@postgres:5432/sfa}
+      # SLA
+      - SLA_HIGH_HOURS=${SLA_HIGH_HOURS:-24}
+      - SLA_MEDIUM_HOURS=${SLA_MEDIUM_HOURS:-48}
+      - SLA_LOW_HOURS=${SLA_LOW_HOURS:-72}
+      # Monitoring
+      - PROMETHEUS_ENABLED=true
+      - DEBUG=${DEBUG:-false}
+    volumes:
+      - suppressions:/app/data/suppressions
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - sfa-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+
+  # ── Streamlit Dashboard ────────────────────────────────────
+  dashboard:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: sfa-dashboard
+    restart: unless-stopped
+    ports:
+      - "${DASHBOARD_PORT:-8501}:8501"
+    environment:
+      - USE_REDIS=${USE_REDIS:-true}
+      - REDIS_URL=redis://redis:6379
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    command: ["dashboard"]
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - sfa-net
+
+  # ── Redis ──────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: sfa-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sfa-net
+
+  # ── PostgreSQL ─────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: sfa-postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-sfa}
+      - POSTGRES_USER=${POSTGRES_USER:-sfa}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-sfa}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-sfa} -d $${POSTGRES_DB:-sfa}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sfa-net
+
+  # ── Prometheus ─────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: sfa-prometheus
+    restart: unless-stopped
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    networks:
+      - sfa-net
+
+  # ── Grafana ────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: sfa-grafana
+    restart: unless-stopped
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-sfa-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      prometheus:
+        condition: service_started
+    networks:
+      - sfa-net
+
+volumes:
+  redis-data:
+  postgres-data:
+  prometheus-data:
+  grafana-data:
+  suppressions:
+
+networks:
+  sfa-net:
+    driver: bridge

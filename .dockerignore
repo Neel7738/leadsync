@@ -1,0 +1,53 @@
+# ════════════════════════════════════════════════════════════════
+# Docker Ignore — keep image clean
+# ════════════════════════════════════════════════════════════════
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Docker (don't include docker files in image context)
+docker/docker-compose.yml
+docker/prometheus.yml
+docker/grafana/
+
+# Local config (use env vars in docker-compose instead)
+.env
+.env.local
+.env.production
+
+# Test files (not needed in production image)
+tests/
+
+# Windows-specific
+*.bat
+desktop.ini
+
+# Suppression list (use volume mount)
+.suppressions.txt
+data/suppressions/
+
+# Docs
+README.md
+LICENSE
