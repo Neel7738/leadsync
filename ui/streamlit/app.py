@@ -15,7 +15,7 @@ import sys
 import os
 import json
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Dict
 
 import streamlit as st
 
