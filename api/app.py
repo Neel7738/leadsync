@@ -84,6 +84,81 @@ app.add_middleware(
 
 # ── Lifespan: initialize database + SLA checker ──────────────
 from contextlib import asynccontextmanager
+import threading as _thr
+
+class GmailPoller:
+    """Background Gmail IMAP poller — auto-fetches and queues new emails every N seconds."""
+    def __init__(self, interval: int = 60):
+        self.interval = interval
+        self._stop = _thr.Event()
+        self._thread: _thr.Thread | None = None
+        self.last_run: str | None = None
+        self.last_fetched = 0
+        self.runs = 0
+
+    def _is_configured(self) -> bool:
+        try:
+            from core.config import get_settings
+            s = get_settings()
+            if getattr(s, "air_gapped", False):
+                return False
+            u = (getattr(s, "imap_username", "") or "").strip()
+            p = (getattr(s, "imap_password", "") or "").strip()
+            return bool(u and p and "@" in u and u != "test@leadsync.local")
+        except: return False
+
+    def poll_once(self) -> dict:
+        if not self._is_configured():
+            return {"skipped": True, "reason": "Gmail not configured or AIR_GAPPED"}
+        try:
+            from core.config import get_settings
+            from core.ingest.email import fetch_emails
+            from core.intelligence.scorer import score_prospect
+            from core.queue import get_queue
+            s = get_settings()
+            convs = fetch_emails(s.imap_host, s.imap_port, s.imap_username, s.imap_password, limit=10)
+            q = get_queue()
+            added = 0
+            for c in convs:
+                try:
+                    scored = score_prospect(c)
+                    q.add(scored)
+                    added += 1
+                except Exception: continue
+            self.last_run = __import__("datetime").datetime.utcnow().isoformat()
+            self.last_fetched = len(convs)
+            self.runs += 1
+            logger.info(f"Gmail poll: fetched {len(convs)}, queued {added}")
+            return {"fetched": len(convs), "queued": added}
+        except Exception as e:
+            logger.warning(f"Gmail poll failed: {e}")
+            return {"error": str(e)}
+
+    def start(self):
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop.clear()
+        def loop():
+            while not self._stop.wait(self.interval):
+                try: self.poll_once()
+                except Exception as e: logger.warning(f"Gmail poll loop error: {e}")
+        self._thread = _thr.Thread(target=loop, name="gmail-poller", daemon=True)
+        self._thread.start()
+        logger.info(f"Gmail poller started (every {self.interval}s)")
+
+    def stop(self):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=3)
+
+_gmail_poller: GmailPoller | None = None
+def get_gmail_poller() -> GmailPoller:
+    global _gmail_poller
+    if _gmail_poller is None:
+        import os
+        interval = int(os.environ.get("GMAIL_POLL_INTERVAL", "60"))
+        _gmail_poller = GmailPoller(interval=interval)
+    return _gmail_poller
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -101,6 +176,19 @@ async def lifespan(app: FastAPI):
         logger.info("SLA breach checker started")
     except Exception as e:
         logger.warning(f"SLA checker start failed (non-fatal): {e}")
+    # Gmail auto-poll (only if configured, not air-gapped)
+    try:
+        poller = get_gmail_poller()
+        # do one immediate poll in background after 5s
+        def _delayed():
+            import time as _t
+            _t.sleep(5)
+            if not poller._stop.is_set():
+                poller.poll_once()
+        _thr.Thread(target=_delayed, daemon=True).start()
+        poller.start()
+    except Exception as e:
+        logger.warning(f"Gmail poller start failed (non-fatal): {e}")
     yield
     # shutdown
     try:
@@ -108,6 +196,9 @@ async def lifespan(app: FastAPI):
         get_sla_checker().stop()
     except Exception:
         pass
+    try:
+        get_gmail_poller().stop()
+    except: pass
 
 # attach lifespan to app (FastAPI >=0.109 supports lifespan param; keep on_event for compat)
 app.router.lifespan_context = lifespan
@@ -1079,6 +1170,23 @@ async def audit_stats() -> Dict[str, Any]:
     from core.database.audit import audit as audit_logger
     return audit_logger.get_stats()
 
+
+# ========== Gmail Auto-Poll ==========
+@app.get("/gmail/status", tags=["gmail"])
+async def gmail_status() -> Dict[str, Any]:
+    poller = get_gmail_poller()
+    try:
+        from core.config import get_settings
+        s = get_settings()
+        cfg = bool((getattr(s, "imap_username","") or "").strip() and "@" in getattr(s, "imap_username",""))
+        gmail = getattr(s, "imap_username","") or getattr(s, "smtp_username","")
+    except:
+        cfg=False; gmail=""
+    return {"configured": cfg, "gmail": gmail, "air_gapped": getattr(__import__("core.config", fromlist=["get_settings"]).get_settings(), "air_gapped", False), "interval": poller.interval, "last_run": poller.last_run, "last_fetched": poller.last_fetched, "runs": poller.runs, "alive": poller._thread.is_alive() if poller._thread else False}
+
+@app.post("/gmail/poll", tags=["gmail"])
+async def gmail_poll_now() -> Dict[str, Any]:
+    return get_gmail_poller().poll_once()
 
 # ========== SLA Breach Checker ==========
 

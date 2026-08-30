@@ -1193,9 +1193,9 @@ elif page == "⚙️ Settings":
                     st.rerun()
                 except Exception as e:
                     st.error(f"Save failed: {e} — ensure python-dotenv is installed")
-        c1,c2,c3 = st.columns(3)
+        c1,c2,c3,c4 = st.columns(4)
         with c1:
-            if st.button("🔍 Test IMAP — fetch 1 email from this Gmail", key="setup_test_imap"):
+            if st.button("🔍 Test IMAP", key="setup_test_imap"):
                 try:
                     from core.ingest.email import fetch_emails
                     n = len(fetch_emails("imap.gmail.com",993,imap_user,imap_pass or cur_env.get("IMAP_PASSWORD",""),limit=1))
@@ -1203,7 +1203,7 @@ elif page == "⚙️ Settings":
                 except Exception as e:
                     st.error(f"IMAP failed: {e} — check Gmail → Settings → IMAP Enable + App password")
         with c2:
-            if st.button("📧 Test SMTP — send from this Gmail", key="setup_test_smtp"):
+            if st.button("📧 Test SMTP", key="setup_test_smtp"):
                 try:
                     from core.ingest.email import send_email
                     to = smtp_user or imap_user
@@ -1213,7 +1213,7 @@ elif page == "⚙️ Settings":
                 except Exception as e:
                     st.error(f"SMTP failed: {e}")
         with c3:
-            if st.button("🔄 Fetch Inbox now → Queue", key="setup_fetch_now"):
+            if st.button("🔄 Fetch now", key="setup_fetch_now"):
                 try:
                     from core.ingest.email import fetch_emails
                     from core.intelligence.scorer import score_prospect
@@ -1222,9 +1222,12 @@ elif page == "⚙️ Settings":
                     q = get_queue()
                     for c in convs:
                         q.add(score_prospect(c))
-                    st.success(f"Fetched {len(convs)} from **{imap_user}** → queued {len(convs)}. Go to Dashboard / Priority Queue to see scores.")
+                    st.success(f"Fetched {len(convs)} from **{imap_user}** → queued. Go to Dashboard to see scores.")
                 except Exception as e:
                     st.error(f"Fetch failed: {e}")
+        with c4:
+            if st.button("🤖 Auto-poll: ON", key="setup_autopoll_hint"):
+                st.info("Auto-poll runs every 60s when Gmail is saved — no click needed. Check **Dashboard** Gmail card: `● Connected and polling` or `GET /gmail/status`.")
 
     with tab1:
         st.subheader("Current Configuration (read-only)")

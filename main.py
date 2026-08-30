@@ -73,7 +73,10 @@ def main():
     api_cmd=[sys.executable,"-m","uvicorn","api.app:app", "--host", args.host, "--port", str(args.api_port)]
     ui_cmd=[sys.executable,"-m","streamlit","run", str(ROOT/"ui/streamlit/app.py"), "--server.port", str(args.ui_port), "--server.headless", "true", "--server.runOnSave", "false"]
 
-    print(f"[main] Starting API → http://{args.host}:{args.api_port}  docs → http://{args.host}:{args.api_port}/docs")
+    # gmail poll interval env (default 60s)
+    if "GMAIL_POLL_INTERVAL" not in os.environ:
+        os.environ["GMAIL_POLL_INTERVAL"] = "60"
+    print(f"[main] Starting API → http://{args.host}:{args.api_port}  docs → http://{args.host}:{args.api_port}/docs  [gmail poll every {os.environ['GMAIL_POLL_INTERVAL']}s if Gmail connected]")
     print(f"[main] Starting UI  → http://{args.host}:{args.ui_port}")
     api=subprocess.Popen(api_cmd, cwd=ROOT)
     ui=subprocess.Popen(ui_cmd, cwd=ROOT)
