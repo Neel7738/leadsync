@@ -455,6 +455,22 @@ with st.sidebar:
     if st.button("🚪 Sign Out", use_container_width=True, key="btn_signout_sb"):
         logout()
 
+     # Gmail connection status (visible to all)
+    _gmail_configured = False
+    _gmail_addr = ""
+    try:
+        _s = get_settings()
+        _gmail_addr = (_s.imap_username or _s.smtp_username or "").strip()
+        _gmail_configured = bool(_gmail_addr and _gmail_addr != "test@leadsync.local" and "@" in _gmail_addr)
+    except: pass
+    if _gmail_configured:
+        st.markdown(f"<div style='background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:0.82rem;color:#047857;'>✅ Gmail: <strong>{_gmail_addr}</strong><br>→ watches this inbox</div>", unsafe_allow_html=True)
+    else:
+        st.markdown("<div style='background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:0.82rem;color:#92400e;'>⚠️ Gmail not connected<br>→ this inbox will be watched</div>", unsafe_allow_html=True)
+        if st.button("🔗 Connect Gmail", use_container_width=True, key="btn_connect_gmail_sidebar"):
+            st.session_state["_nav_target"] = "⚙️ Settings"
+            st.rerun()
+
     # Grouped SaaS Navigation (modern, air-gapped safe — no external icons)
     st.markdown('<div class="nav-header">MAIN</div>', unsafe_allow_html=True)
     main_pages = ["📊 Dashboard", "📥 Process Conversation", "📋 Priority Queue"]
@@ -463,11 +479,19 @@ with st.sidebar:
     monitoring_pages = ["🤖 LLM Status", "🔌 WebSocket", "🔍 Webhook Inspector"]
 
     admin_pages = []
+    # Settings visible to all (Gmail connect must not be admin-only)
+    admin_pages.append("⚙️ Settings")
     if is_admin(user):
-        admin_pages.append("⚙️ Settings")
         admin_pages.append("👥 Users")
 
     all_pages = main_pages + monitoring_pages + admin_pages
+    # allow sidebar button to force nav
+    if "_nav_target" in st.session_state and st.session_state["_nav_target"] in all_pages:
+        _forced = st.session_state.pop("_nav_target")
+        page = _forced
+        st.session_state["_forced_page"] = _forced
+    elif "_forced_page" in st.session_state and st.session_state["_forced_page"] in all_pages:
+        page = st.session_state["_forced_page"]
     page = st.radio(
         "Navigation",
         all_pages,
@@ -597,6 +621,27 @@ if page == "📊 Dashboard":
         )
 
     st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Gmail not connected banner (unmissable) ──
+    try:
+        _s2 = get_settings()
+        _g = (_s2.imap_username or _s2.smtp_username or "").strip()
+        _g_ok = bool(_g and _g != "test@leadsync.local" and "@" in _g)
+    except:
+        _g_ok = False
+        _g = ""
+    if not _g_ok:
+        st.warning("⚠️ **Gmail not connected** — LeadSync doesn't know which inbox to watch. → Go to **⚙️ Settings → Setup** (first tab) and connect the Gmail you want it to work on. Then click **Test IMAP**.")
+        c1,c2 = st.columns([1,3])
+        with c1:
+            if st.button("🔗 Connect Gmail now", type="primary", key="dash_connect"):
+                st.session_state["_nav_target"] = "⚙️ Settings"
+                st.rerun()
+        with c2:
+            st.caption("This inbox will be watched for auto follow-ups. Use a Gmail App Password (16-char).")
+        st.divider()
+    else:
+        st.success(f"✅ **Watching inbox:** `{_g}` — new emails will be scored & queued. Manage in **⚙️ Settings**.")
 
     # SLA Breach Banner Alert
     breached = queue.get_breached()
@@ -1037,51 +1082,76 @@ elif page == "⚙️ Settings":
         with c1:
             st.markdown("**Gmail IMAP**")
             imap_user = st.text_input("Gmail address", value=cur_env.get("IMAP_USERNAME", cur.get("imap_username") or ""), placeholder="you@gmail.com", key="setup_imap_user")
-            imap_pass = st.text_input("App password (16-char)", type="password", value="", placeholder="abcd efgh ijkl mnop", key="setup_imap_pass", help="Google Account → Security → App passwords")
-            st.markdown("**Gmail SMTP** (usually same)")
-            smtp_user = st.text_input("SMTP user", value=cur_env.get("SMTP_USERNAME", cur.get("smtp_username") or ""), placeholder="you@gmail.com", key="setup_smtp_user")
-            smtp_pass = st.text_input("SMTP app password", type="password", value="", placeholder="same as above", key="setup_smtp_pass")
+            st.markdown("**← This Gmail will be watched** — LeadSync polls this inbox via IMAP and sends follow-ups from it via SMTP")
+            imap_pass = st.text_input("App password (16-char)", type="password", value="", placeholder="abcd efgh ijkl mnop", key="setup_imap_pass", help="Google Account → Security → 2-Step Verification → App passwords → Mail/Windows → 16 chars")
+            st.markdown("**Gmail SMTP** (usually same address — this is the sender)")
+            smtp_user = st.text_input("SMTP user (sender)", value=cur_env.get("SMTP_USERNAME", cur.get("smtp_username") or ""), placeholder="same Gmail as above", key="setup_smtp_user")
+            smtp_pass = st.text_input("SMTP app password", type="password", value="", placeholder="same as IMAP if same Gmail", key="setup_smtp_pass")
+            st.caption("Need app password? Google Account → Security → 2-Step → App passwords. Enable IMAP in Gmail → Settings → Forwarding/IMAP → Enable IMAP.")
         with c2:
             st.markdown("**LLM & Mode**")
             llm_provider = st.selectbox("LLM Provider", ["ollama","openai","anthropic","google","groq","nim"], index=["ollama","openai","anthropic","google","groq","nim"].index(cur_env.get("LLM_PROVIDER", cur.get("llm_provider") or "ollama")) if cur_env.get("LLM_PROVIDER", cur.get("llm_provider") or "ollama") in ["ollama","openai","anthropic","google","groq","nim"] else 0, key="setup_llm")
             air_gapped = st.checkbox("AIR_GAPPED (offline, no outside calls)", value=str(cur_env.get("AIR_GAPPED","false")).lower()=="true", key="setup_air")
             openai_key = st.text_input("OPENAI_API_KEY (if LLM=openai)", type="password", value="••••" if cur_env.get("OPENAI_API_KEY") else "", key="setup_oai")
             st.caption("Ollama default `llama3.1:8b` works offline if `ollama` is running")
-        if st.button("💾 Save to .env & Reload", type="primary", key="setup_save"):
-            try:
-                from dotenv import set_key
-                set_key(str(env_path), "IMAP_USERNAME", imap_user)
-                if imap_pass: set_key(str(env_path), "IMAP_PASSWORD", imap_pass.replace(" ",""))
-                set_key(str(env_path), "SMTP_USERNAME", smtp_user or imap_user)
-                if smtp_pass or imap_pass: set_key(str(env_path), "SMTP_PASSWORD", (smtp_pass or imap_pass).replace(" ",""))
-                set_key(str(env_path), "IMAP_HOST", "imap.gmail.com")
-                set_key(str(env_path), "SMTP_HOST", "smtp.gmail.com")
-                set_key(str(env_path), "LLM_PROVIDER", llm_provider)
-                if openai_key and openai_key!="••••": set_key(str(env_path), "OPENAI_API_KEY", openai_key)
-                set_key(str(env_path), "AIR_GAPPED", "true" if air_gapped else "false")
-                from core.config import reload_settings
-                reload_settings()
-                st.success("Saved to .env — reloaded. Test IMAP/SMTP with buttons below.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Save failed: {e} — ensure python-dotenv is installed")
-        c1,c2 = st.columns(2)
+        if st.button("💾 Save to .env & Reload — this Gmail will be watched", type="primary", key="setup_save"):
+            if not imap_user or "@" not in imap_user:
+                st.error("Enter a valid Gmail address for the inbox to watch")
+            elif not (imap_pass or cur_env.get("IMAP_PASSWORD")):
+                st.error("Enter the 16-char App password")
+            else:
+                try:
+                    from dotenv import set_key
+                    set_key(str(env_path), "IMAP_USERNAME", imap_user)
+                    if imap_pass: set_key(str(env_path), "IMAP_PASSWORD", imap_pass.replace(" ",""))
+                    set_key(str(env_path), "IMAP_HOST", "imap.gmail.com")
+                    set_key(str(env_path), "IMAP_PORT", "993")
+                    set_key(str(env_path), "SMTP_USERNAME", smtp_user or imap_user)
+                    if smtp_pass or imap_pass: set_key(str(env_path), "SMTP_PASSWORD", (smtp_pass or imap_pass).replace(" ",""))
+                    set_key(str(env_path), "SMTP_HOST", "smtp.gmail.com")
+                    set_key(str(env_path), "SMTP_PORT", "587")
+                    set_key(str(env_path), "EMAIL_SENDING_DOMAIN", smtp_user or imap_user)
+                    set_key(str(env_path), "LLM_PROVIDER", llm_provider)
+                    if openai_key and openai_key!="••••": set_key(str(env_path), "OPENAI_API_KEY", openai_key)
+                    set_key(str(env_path), "AIR_GAPPED", "true" if air_gapped else "false")
+                    from core.config import reload_settings
+                    reload_settings()
+                    st.success(f"Saved — now watching **{imap_user}** ✅ Test below to confirm it actually works on this Gmail")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Save failed: {e} — ensure python-dotenv is installed")
+        c1,c2,c3 = st.columns(3)
         with c1:
-            if st.button("🔍 Test IMAP", key="setup_test_imap"):
+            if st.button("🔍 Test IMAP — fetch 1 email from this Gmail", key="setup_test_imap"):
                 try:
                     from core.ingest.email import fetch_emails
                     n = len(fetch_emails("imap.gmail.com",993,imap_user,imap_pass or cur_env.get("IMAP_PASSWORD",""),limit=1))
-                    st.success(f"IMAP OK — fetched {n} sample")
+                    st.success(f"IMAP OK — fetched {n} from **{imap_user}**")
                 except Exception as e:
-                    st.error(f"IMAP failed: {e}")
+                    st.error(f"IMAP failed: {e} — check Gmail → Settings → IMAP Enable + App password")
         with c2:
-            if st.button("📧 Test SMTP", key="setup_test_smtp"):
+            if st.button("📧 Test SMTP — send from this Gmail", key="setup_test_smtp"):
                 try:
                     from core.ingest.email import send_email
-                    r = send_email("test@leadsync.local","LeadSync test","Hello from Web Setup",smtp_username=smtp_user or imap_user, smtp_password=(smtp_pass or imap_pass or cur_env.get("SMTP_PASSWORD","")).replace(" ",""))
+                    to = smtp_user or imap_user
+                    r = send_email(to,"LeadSync test — from "+to,"Hello from LeadSync Web Setup — if you get this, "+to+" is correctly connected.",smtp_username=smtp_user or imap_user, smtp_password=(smtp_pass or imap_pass or cur_env.get("SMTP_PASSWORD","")).replace(" ",""))
                     st.json(r)
+                    if r.get("status")=="sent": st.success(f"Check inbox of {to}")
                 except Exception as e:
                     st.error(f"SMTP failed: {e}")
+        with c3:
+            if st.button("🔄 Fetch Inbox now → Queue", key="setup_fetch_now"):
+                try:
+                    from core.ingest.email import fetch_emails
+                    from core.intelligence.scorer import score_prospect
+                    from core.queue import get_queue
+                    convs = fetch_emails("imap.gmail.com",993,imap_user,imap_pass or cur_env.get("IMAP_PASSWORD",""),limit=10)
+                    q = get_queue()
+                    for c in convs:
+                        q.add(score_prospect(c))
+                    st.success(f"Fetched {len(convs)} from **{imap_user}** → queued {len(convs)}. Go to Dashboard / Priority Queue to see scores.")
+                except Exception as e:
+                    st.error(f"Fetch failed: {e}")
 
     with tab1:
         st.subheader("Current Configuration (read-only)")
