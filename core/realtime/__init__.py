@@ -200,13 +200,13 @@ def emit_queue_event(event_type: str, **kwargs) -> None:
     # Emit to event bus (for SSE and subscribers)
     event_bus.emit(event_type, data)
 
-    # Broadcast to WebSocket clients (fire-and-forget async)
+    # Broadcast to WebSocket clients (fire-and-forget async) — safe with running loop detection
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop.create_task(ws_manager.broadcast(event_type, data))
-        else:
-            loop.run_until_complete(ws_manager.broadcast(event_type, data))
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # no running loop — skip WS broadcast (will be delivered via SSE / next poll)
+            return
+        loop.create_task(ws_manager.broadcast(event_type, data))
     except RuntimeError:
-        # No event loop running — skip WebSocket broadcast
         pass

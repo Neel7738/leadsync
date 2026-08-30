@@ -74,6 +74,9 @@ try:
 
         # Database (optional)
         database_url: Optional[str] = None
+        # Queue
+        queue_max_items_per_rep: int = 50
+        trusted_proxies: str = ""
 
         # Security
         enforce_2fa_admin: bool = False

@@ -632,7 +632,8 @@ class AlertManager:
         last_error = None
         attempts = 0
 
-        for attempt in range(self._retry.config.max_attempts):
+        max_attempts = getattr(self._retry.config, "max_attempts", getattr(self._retry.config, "max_retries", 3))
+        for attempt in range(max_attempts):
             attempts = attempt + 1
             try:
                 result = channel(alert)
@@ -663,7 +664,7 @@ class AlertManager:
                 last_error = str(e)
 
             # Wait before retry (skip on last attempt)
-            if attempt < self._retry.config.max_attempts - 1:
+            if attempt < max_attempts - 1:
                 delay = self._calc_delay(attempt, self._retry.config)
                 logger.warning(
                     f"Channel {channel.__name__} attempt {attempts} failed: {last_error}. "

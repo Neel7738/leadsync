@@ -25,6 +25,8 @@ dependencies = [
     "websocket-client>=1.6.0",
     "pyyaml>=6.0",
     "fpdf2>=2.7.0",
+    "passlib[bcrypt]>=1.7.4",
+    "bcrypt>=4.0.0",
 ]
 
 [project.optional-dependencies]

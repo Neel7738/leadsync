@@ -89,36 +89,27 @@ def process_meeting_notes(
 def _extract_date_from_notes(notes: str) -> datetime:
     """Extract meeting date from notes text."""
     import re
-    
-    # Date patterns common in meeting notes
+
     date_patterns = [
-        r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}",  # MM/DD/YYYY or DD/MM/YYYY
-        r"(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{2,4}",  # Month DD, YYYY
-        r"\d{2,4}[/-]\d{1,2}[/-]\d{1,2}",  # YYYY/MM/DD or YYYY-MM-DD
+        (r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}", ["%m/%d/%Y", "%d/%m/%Y", "%m-%d-%Y", "%d-%m-%Y", "%m/%d/%y", "%d/%m/%y"]),
+        (r"(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{2,4}", ["%B %d, %Y", "%B %d %Y", "%B %d, %y"]),
+        (r"\d{4}[/-]\d{1,2}[/-]\d{1,2}", ["%Y/%m/%d", "%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%d"]),
     ]
-    
-    for pattern in date_patterns:
+
+    for pattern, fmts in date_patterns:
         match = re.search(pattern, notes)
         if match:
-            date_str = match.group(1)
-            try:
-                # Try MM/DD/YYYY first
-                date = datetime.strptime(date_str, "%m/%d/%Y")
-                return date
-            except ValueError:
+            date_str = match.group(0).strip().replace(",", " ,").replace("  ", " ").replace(" ,", ",")
+            # normalize: remove extra comma spacing for strptime
+            date_str = re.sub(r"\s*,\s*", ", ", date_str).strip()
+            for fmt in fmts:
                 try:
-                    # Try YYYY-MM-DD
-                    date = datetime.strptime(date_str, "%Y-%m-%d")
-                    return date
+                    return datetime.strptime(date_str, fmt)
                 except ValueError:
-                    try:
-                        # Try Month DD, YYYY
-                        date = datetime.strptime(date_str, "%B %d, %Y")
-                        return date
-                    except ValueError:
-                        continue
-    
-    # Default: use current date if no date found
+                    continue
+            # try flexible parse with dateutil-like fallback: try stripping leading zeros handling
+            continue
+
     return datetime.utcnow()
 
 

@@ -51,7 +51,7 @@ def score_prospect(
     if conversation is None:
         raise ValueError("Conversation cannot be None")
     
-    # Use provided recency_days or calculate from conversation date
+    # Use provided recency_days or calculate from conversation date (fractional days)
     if recency_days is None:
         from datetime import datetime
         now = datetime.utcnow()
@@ -61,7 +61,8 @@ def score_prospect(
                 conv_date = datetime.fromisoformat(conv_date)
             except ValueError:
                 conv_date = now
-        recency_days = max(0, (now - conv_date).days)
+        delta = now - conv_date
+        recency_days = max(0.0, delta.total_seconds() / 86400.0)
     
     # Clamp recency to non-negative
     recency_days = max(0, recency_days)

@@ -46,18 +46,31 @@ _SALT_PREFIX = "sfa:"
 
 def hash_password(password: str, salt: Optional[str] = None) -> str:
     """
-    Hash a password with SHA-256 + salt.
-
-    Returns: "salt:hash" string
+    Hash a password with bcrypt (preferred) fallback to SHA-256+salt for legacy.
+    Returns bcrypt hash or "salt:sha256" for legacy.
     """
-    if salt is None:
-        salt = secrets.token_hex(16)
-    hashed = hashlib.sha256(f"{_SALT_PREFIX}{salt}:{password}".encode()).hexdigest()
-    return f"{salt}:{hashed}"
+    try:
+        import bcrypt
+        # bcrypt handles its own salt; ignore provided salt for bcrypt path
+        return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    except Exception:
+        if salt is None:
+            salt = secrets.token_hex(16)
+        hashed = hashlib.sha256(f"{_SALT_PREFIX}{salt}:{password}".encode()).hexdigest()
+        return f"{salt}:{hashed}"
 
 
 def verify_password(password: str, stored_hash: str) -> bool:
-    """Verify a password against a stored hash."""
+    """Verify against bcrypt or legacy SHA-256."""
+    if not stored_hash:
+        return False
+    # bcrypt hashes start with $2b$ / $2a$
+    if stored_hash.startswith("$2"):
+        try:
+            import bcrypt
+            return bcrypt.checkpw(password.encode(), stored_hash.encode())
+        except Exception:
+            return False
     try:
         salt, expected_hash = stored_hash.split(":", 1)
         actual_hash = hashlib.sha256(f"{_SALT_PREFIX}{salt}:{password}".encode()).hexdigest()
@@ -79,8 +92,11 @@ def _load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     path = config_path or os.environ.get("AUTH_CONFIG_PATH", _DEFAULT_CONFIG_PATH)
 
     if not os.path.exists(path):
-        # Create default config with admin user
-        default_password = os.environ.get("ADMIN_PASSWORD", "admin123")
+        default_password = os.environ.get("ADMIN_PASSWORD")
+        if not default_password:
+            # Generate a random password and force change on first login; never default to admin123 in prod
+            default_password = secrets.token_urlsafe(16)
+            logger.warning(f"Generated random admin password for {path} — set ADMIN_PASSWORD env var for deterministic bootstrap")
         default_config = {
             "users": {
                 "admin": {
@@ -96,7 +112,11 @@ def _load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
             "lockout_minutes": 15,
         }
         save_config(default_config, path)
-        logger.warning(f"Created default auth config at {path} — change the admin password!")
+        if os.environ.get("ADMIN_PASSWORD"):
+            logger.warning(f"Created default auth config at {path} — change the admin password!")
+        # Print one-time to server logs only if auto-generated
+        if not os.environ.get("ADMIN_PASSWORD"):
+            logger.warning(f"Admin bootstrap password (one-time): {default_password}")
 
     try:
         import yaml
@@ -629,7 +649,10 @@ class APIKeyManager:
             config["api_keys"] = {}
 
         key = f"sfa_{secrets.token_urlsafe(32)}"
-        config["api_keys"][key[:12] + "..."] = {
+        # Use full key hash as index to avoid prefix collision; keep prefix for display only
+        key_id = hashlib.sha256(key.encode()).hexdigest()[:16]
+        config["api_keys"][key_id] = {
+            "prefix": key[:12] + "...",
             "name": name,
             "role": role,
             "created_at": datetime.utcnow().isoformat(),
@@ -641,10 +664,7 @@ class APIKeyManager:
     def verify_key(self, api_key: str) -> Optional[Dict[str, Any]]:
         """Verify an API key. Returns key metadata or None."""
         config = _load_config(self._config_path)
-        prefix = api_key[:12] + "..." if len(api_key) > 12 else api_key
-
-        for stored_prefix, key_data in config.get("api_keys", {}).items():
-            if stored_prefix == prefix:
+        for key_data in config.get("api_keys", {}).values():
                 if verify_password(api_key, key_data["key_hash"]):
                     return {
                         "name": key_data.get("name", "unknown"),
@@ -655,12 +675,17 @@ class APIKeyManager:
     def revoke_key(self, api_key: str) -> bool:
         """Revoke an API key."""
         config = _load_config(self._config_path)
-        prefix = api_key[:12] + "..." if len(api_key) > 12 else api_key
-
-        if prefix in config.get("api_keys", {}):
-            del config["api_keys"][prefix]
-            save_config(config, self._config_path)
-            return True
+        api_keys = config.get("api_keys", {})
+        for kid, key_data in list(api_keys.items()):
+            if verify_password(api_key, key_data.get("key_hash", "")):
+                del api_keys[kid]
+                save_config(config, self._config_path)
+                return True
+            # legacy prefix match fallback
+            if kid == (api_key[:12] + "..." if len(api_key) > 12 else api_key):
+                del api_keys[kid]
+                save_config(config, self._config_path)
+                return True
         return False
 
 

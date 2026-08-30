@@ -312,13 +312,17 @@ class LLMManager:
             if resp.status_code == 200:
                 data = resp.json()
                 available = [m["name"] for m in data.get("models", [])]
-                # Sort: prefer our cascade order, unknown models go last
+                # Sort: exact match first, then prefix match, unknown last — strict
                 cascade = self.OLLAMA_MODEL_CASCADE
                 ordered = []
                 for m in cascade:
-                    # Match by prefix (e.g. "llama3.1:8b" matches "llama3.1:8b-instruct-q4_0")
-                    if any(avail.startswith(m.split(":")[0]) and (m.split(":")[1] in avail if ":" in m else True) for avail in available):
-                        ordered.append(m)
+                    m_base = m.split(":")[0]
+                    m_tag = m.split(":")[1] if ":" in m else ""
+                    for avail in available:
+                        if avail == m or (avail.startswith(m_base + ":") and m_tag in avail):
+                            if m not in ordered:
+                                ordered.append(m)
+                            break
                 for av in available:
                     if av not in ordered:
                         ordered.append(av)

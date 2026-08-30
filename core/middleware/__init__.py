@@ -167,11 +167,19 @@ class RateLimitMiddleware:
         return self._default
 
     def _get_client_ip(self, request) -> str:
-        """Extract client IP from request, respecting X-Forwarded-For."""
+        """Extract client IP — only trust X-Forwarded-For if from trusted proxy."""
+        import os as _os
+        trusted_proxies = {p.strip() for p in _os.environ.get("TRUSTED_PROXIES", "").split(",") if p.strip()}
+        client_host = request.client.host if request.client else "unknown"
         forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        return request.client.host if request.client else "unknown"
+        if forwarded and (not trusted_proxies or client_host in trusted_proxies):
+            # take first forwarded IP but validate it looks like IP
+            candidate = forwarded.split(",")[0].strip()
+            # basic IP validation — fallback to client_host if spoofed
+            import re as _re
+            if _re.match(r"^\d{1,3}(\.\d{1,3}){3}$", candidate) or ":" in candidate:
+                return candidate
+        return client_host
 
     def check(self, path: str, client_ip: str) -> Tuple[bool, Dict[str, Any]]:
         """Check if a request is allowed."""

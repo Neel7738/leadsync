@@ -104,18 +104,23 @@ class TOTPManager:
         return str(otp).zfill(self.digits)
 
     def _base32_decode(self, s: str) -> bytes:
-        """Decode base32 string."""
-        # Standard base32 alphabet
-        alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
-        s = s.upper().rstrip("=")
-
-        result = 0
-        for char in s:
-            result = result * 32 + alphabet.index(char)
-
-        # Convert to bytes
-        byte_length = math.ceil(len(s) * 5 / 8)
-        return result.to_bytes(byte_length, byteorder="big")
+        """Decode base32 string (RFC 4648) using stdlib with fallback."""
+        import base64
+        s = s.strip().replace(" ", "").upper()
+        # pad to multiple of 8
+        pad = (-len(s)) % 8
+        s_padded = s + ("=" * pad)
+        try:
+            return base64.b32decode(s_padded, casefold=True)
+        except Exception:
+            # fallback legacy path
+            alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+            s_nopad = s.rstrip("=")
+            result = 0
+            for char in s_nopad:
+                result = result * 32 + alphabet.index(char)
+            byte_length = math.ceil(len(s_nopad) * 5 / 8)
+            return result.to_bytes(byte_length, byteorder="big")
 
     def generate(self, secret: str, time_offset: int = 0) -> str:
         """

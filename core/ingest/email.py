@@ -70,6 +70,33 @@ def _extract_entities_from_text(text: str) -> ExtractedEntity:
     return _heuristic_extract(text)
 
 
+def _heuristic_urgency_and_deal(text: str):
+    """Heuristic urgency + deal_size detection for email fallback."""
+    tl = text.lower()
+    urgency_high = ["urgent", "asap", "immediately", "today", "tonight", "deadline", "critical", "rush"]
+    urgency_medium = ["soon", "this week", "follow up", "follow-up", "next step", "by friday", "by end"]
+    if any(kw in tl for kw in urgency_high):
+        urgency = "high"
+    elif any(kw in tl for kw in urgency_medium):
+        urgency = "medium"
+    else:
+        urgency = "low"
+    deal = None
+    for pat in [r'\$(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)', r'(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s*(?:dollars?|usd)', r'(\d+(?:\.\d+)?)\s*k\b']:
+        m = re.search(pat, text, re.IGNORECASE)
+        if m:
+            try:
+                val = float(m.group(1).replace(",", ""))
+                if 'k' in pat:
+                    val *= 1000
+                if val > 0:
+                    deal = val
+                    break
+            except Exception:
+                continue
+    return urgency, deal
+
+
 def _heuristic_extract(text: str) -> ExtractedEntity:
     """Fallback heuristic entity extraction when LLM is unavailable."""
     if not text:
@@ -129,9 +156,12 @@ def _heuristic_extract(text: str) -> ExtractedEntity:
                 deal_size = val
                 break
 
+    # Persist urgency/deal_size in entity where possible for downstream fallback
+    # ExtractedEntity has no urgency field; store urgency hint in commitment field for scorer fallback chain
     return ExtractedEntity(
         sentiment=sentiment,
         sentiment_score=round(sentiment_score, 2),
+        commitment=None,
     )
 
 
@@ -295,10 +325,11 @@ def fetch_emails(
                         unique.append(p)
                 participants = unique or [{"email": "unknown", "name": "Unknown"}]
 
-                # Extract entities
+                # Extract entities + urgency/deal_size via heuristics (fallback when LLM unavailable)
                 entities = _extract_entities_from_text(body)
                 commitments = _extract_commitments_from_text(body)
-
+                # Derive urgency/deal_size heuristically if LLM didn't populate them
+                _urgency, _deal = _heuristic_urgency_and_deal(body + " " + subject)
                 # Build conversation
                 conv = Conversation(
                     source="email",
@@ -308,8 +339,8 @@ def fetch_emails(
                     commitments=commitments,
                     entities=entities,
                     sentiment=entities.sentiment or "neutral",
-                    deal_size=None,
-                    urgency="low",  # Will be refined by scoring
+                    deal_size=_deal,
+                    urgency=_urgency,
                 )
                 conversations.append(conv)
 
@@ -466,23 +497,24 @@ def send_email(
             "timestamp": datetime.utcnow().isoformat(),
         }
 
-    # Build message
-    msg = email.mime.text.MIMEText(body, "plain", "utf-8")
-    msg["From"] = sender
-    msg["To"] = to_address
-    msg["Subject"] = subject
-    msg["X-Mailer"] = "SalesFollowUpAgent/1.0"
-
-    # Add tracking pixel if requested
+    # Build message — multipart/alternative when tracking pixel requested
     if include_tracking_pixel and tracking_pixel_url:
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText as MIMETextPart
         pixel_html = f'<img src="{tracking_pixel_url}" width="1" height="1" style="display:none;" alt="">'
-        html_part = email.mime.text.MIMEText(
-            f"<html><body>{body}<br>{pixel_html}</body></html>",
-            "html",
-            "utf-8",
-        )
+        msg = MIMEMultipart("alternative")
+        msg["From"] = sender
+        msg["To"] = to_address
+        msg["Subject"] = subject
+        msg["X-Mailer"] = "SalesFollowUpAgent/1.0"
+        msg.attach(MIMETextPart(body, "plain", "utf-8"))
+        msg.attach(MIMETextPart(f"<html><body>{body}<br>{pixel_html}</body></html>", "html", "utf-8"))
+    else:
         msg = email.mime.text.MIMEText(body, "plain", "utf-8")
-        msg.attach(html_part)
+        msg["From"] = sender
+        msg["To"] = to_address
+        msg["Subject"] = subject
+        msg["X-Mailer"] = "SalesFollowUpAgent/1.0"
 
     try:
         with smtplib.SMTP(smtp_h, smtp_p, timeout=30) as server:

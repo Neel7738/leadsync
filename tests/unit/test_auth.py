@@ -29,10 +29,15 @@ class TestPasswordHashing:
     def test_hash_returns_salt_and_hash(self):
         from core.auth import hash_password
         result = hash_password("testpass")
-        assert ":" in result
-        salt, hashed = result.split(":", 1)
-        assert len(salt) == 32  # hex(16 bytes)
-        assert len(hashed) == 64  # sha256 hex
+        # bcrypt or legacy SHA256+salt both acceptable post-hardening
+        if result.startswith("$2"):
+            assert result.startswith("$2b$") or result.startswith("$2a$")
+            assert len(result) >= 50
+        else:
+            assert ":" in result
+            salt, hashed = result.split(":", 1)
+            assert len(salt) == 32  # hex(16 bytes)
+            assert len(hashed) == 64  # sha256 hex
 
     def test_verify_correct_password(self):
         from core.auth import hash_password, verify_password

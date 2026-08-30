@@ -32,14 +32,31 @@ def _emit(event_type: str, **kwargs) -> None:
 class PriorityQueue:
     """In-memory priority queue for scored prospects with SLA tracking."""
 
-    def __init__(self):
+    def __init__(self, max_items: int | None = None):
         self._items: dict[str, ScoredProspect] = {}
+        self._max_items_override = max_items
 
     def add(self, scored: ScoredProspect) -> None:
-        """Add or update a scored prospect."""
+        """Add or update a scored prospect. Enforces QUEUE_MAX_ITEMS by evicting lowest priority."""
         if not isinstance(scored, ScoredProspect):
             raise TypeError("expected ScoredProspect")
         cid = str(scored.conversation_id)
+        # Enforce max size if configured
+        if getattr(self, "_max_items_override", None) is not None:
+            max_items = self._max_items_override
+        else:
+            try:
+                from ..config import get_settings as _gs
+                max_items = getattr(_gs(), "queue_max_items_per_rep", 50)
+            except Exception:
+                max_items = 50
+        if cid not in self._items and len(self._items) >= max_items:
+            # evict lowest priority non-breached first
+            evict_candidate = sorted(self._items.values(), key=lambda s: (s.sla_breached, s.priority_score or 0))[0]
+            evict_id = str(evict_candidate.conversation_id)
+            del self._items[evict_id]
+            _emit("queue:evicted", conversation_id=evict_id, reason="queue_full", total_size=self.size())
+            logger.warning(f"Queue at capacity ({max_items}) — evicted lowest priority {evict_id}")
         self._items[cid] = scored
         _emit(
             "queue:added",

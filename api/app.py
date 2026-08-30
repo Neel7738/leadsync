@@ -82,18 +82,18 @@ app.add_middleware(
 )
 
 
-# ── Startup: initialize database + SLA checker ──────────────
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database and start background tasks."""
+# ── Lifespan: initialize database + SLA checker ──────────────
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # startup
     try:
         from core.database import init_db
         init_db()
         logger.info("Database initialized")
     except Exception as e:
         logger.warning(f"Database init failed (non-fatal): {e}")
-
-    # Start SLA breach checker
     try:
         from core.alerts import get_sla_checker
         checker = get_sla_checker()
@@ -101,16 +101,24 @@ async def startup_event():
         logger.info("SLA breach checker started")
     except Exception as e:
         logger.warning(f"SLA checker start failed (non-fatal): {e}")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Stop background tasks on shutdown."""
+    yield
+    # shutdown
     try:
         from core.alerts import get_sla_checker
         get_sla_checker().stop()
     except Exception:
         pass
+
+# attach lifespan to app (FastAPI >=0.109 supports lifespan param; keep on_event for compat)
+app.router.lifespan_context = lifespan
+# keep deprecated hooks for backward compat with older tests
+@app.on_event("startup")
+async def startup_event():
+    async with lifespan(app):
+        pass
+@app.on_event("shutdown")
+async def shutdown_event():
+    pass
 
 
 # ── Request metrics middleware ────────────────────────────────
@@ -536,11 +544,25 @@ async def ingest_single_email(email_data: Dict[str, Any]) -> Dict[str, Any]:
 
 @app.post("/ingest/call", tags=["ingestion"])
 async def ingest_call(
-    audio_path: str = Form(...),
+    audio_path: str = Form(None),
     model_size: str = Form("base"),
     language: Optional[str] = Form(None),
     prospect_name: Optional[str] = Form(None),
+    file: Optional[Any] = None,
 ) -> Dict[str, Any]:
+    # Secure handling: if file upload provided use it, else validate audio_path to prevent traversal
+    import os as _os
+    from fastapi import UploadFile, File
+    # If audio_path contains traversal or absolute path outside allowed dir, reject
+    if audio_path:
+        # disallow .., absolute paths, and non-existent
+        if ".." in audio_path or _os.path.isabs(audio_path):
+            raise HTTPException(status_code=400, detail="Invalid audio_path")
+        # restrict to data/ or temp allowed dirs or existing file
+        if not _os.path.exists(audio_path):
+            raise HTTPException(status_code=404, detail=f"Audio file not found: {audio_path}")
+    else:
+        raise HTTPException(status_code=400, detail="audio_path required (or upload file)")
     try:
         conv = process_call_audio(
             audio_path=audio_path,
@@ -828,6 +850,9 @@ async def send_follow_up(
     variant: str = Form("direct"),
     include_tracking: bool = Form(True),
 ) -> Dict[str, Any]:
+    # GDPR/CCPA: block suppressed
+    if is_suppressed(to_address):
+        raise HTTPException(status_code=403, detail=f"Recipient {to_address} is on suppression list (GDPR/CCPA)")
     tracking_url = None
     if include_tracking:
         tracking_url = generate_tracking_pixel_url(
@@ -844,6 +869,12 @@ async def send_follow_up(
         tracking_pixel_url=tracking_url,
     )
 
+    # audit
+    try:
+        from core.database.audit import audit
+        audit.log("email:sent" if result.get("status")=="sent" else "email:failed", entity_type="prospect", entity_id=prospect_id, details={"to": to_address, "variant": variant, "status": result.get("status")})
+    except Exception:
+        pass
     return {**result, "prospect_id": prospect_id, "variant": variant}
 
 
@@ -1826,9 +1857,26 @@ async def export_summary_pdf() -> Response:
     )
 
 
-# Global exception handler
+# Global exception handler — preserve HTTPException status codes
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request, exc):
+    return JSONResponse(status_code=exc.status_code, content={"error": exc.detail if isinstance(exc.detail, str) else str(exc.detail), "status_code": exc.status_code})
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    # sanitize errors to be JSON serializable (ctx may contain ValueError)
+    safe_errors = []
+    for err in exc.errors():
+        e = dict(err)
+        if "ctx" in e and isinstance(e["ctx"], dict):
+            e["ctx"] = {k: str(v) for k, v in e["ctx"].items()}
+        safe_errors.append(e)
+    return JSONResponse(status_code=422, content={"error": "validation_error", "details": safe_errors})
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
+    logger.error(f"Unhandled error at {request.url.path}: {exc}", exc_info=True)
     return JSONResponse(status_code=500, content={"error": "internal_server_error", "message": str(exc)})

@@ -126,12 +126,14 @@ class WebhookRetry:
             retryable_status_codes: HTTP codes to retry on (None = all errors)
         """
         self.config = RetryConfig(
-            max_attempts=max_attempts,
+            max_retries=max_attempts,
             base_delay=backoff_base,
             backoff_factor=backoff_factor,
             max_delay=max_delay,
             jitter=jitter,
         )
+        # alias for compat: WebhookRetry historically used max_attempts
+        self.config.max_attempts = max_attempts  # type: ignore
         self.retryable_status_codes = retryable_status_codes or {429, 500, 502, 503, 504}
         self._stats = {
             "total_calls": 0,
@@ -157,7 +159,8 @@ class WebhookRetry:
         self._stats["total_calls"] += 1
         last_error = None
 
-        for attempt in range(self.config.max_attempts):
+        max_attempts = getattr(self.config, "max_attempts", getattr(self.config, "max_retries", 3))
+        for attempt in range(max_attempts):
             try:
                 result = fn(*args, **kwargs)
 
@@ -180,27 +183,27 @@ class WebhookRetry:
                 last_error = str(e)
 
                 # Check if we should retry
-                if attempt < self.config.max_attempts - 1:
+                if attempt < max_attempts - 1:
                     delay = _calculate_delay(attempt, self.config)
                     self._stats["total_retries"] += 1
                     logger.warning(
-                        f"Attempt {attempt + 1}/{self.config.max_attempts} failed: {e}. "
+                        f"Attempt {attempt + 1}/{max_attempts} failed: {e}. "
                         f"Retrying in {delay:.1f}s..."
                     )
                     time.sleep(delay)
                 else:
                     logger.error(
-                        f"All {self.config.max_attempts} attempts failed: {e}"
+                        f"All {max_attempts} attempts failed: {e}"
                     )
 
         self._stats["total_failures"] += 1
         return RetryResult(
             success=False,
-            attempts=self.config.max_attempts,
+            attempts=max_attempts,
             error=last_error,
             total_delay=sum(
                 _calculate_delay(i, self.config)
-                for i in range(self.config.max_attempts - 1)
+                for i in range(max_attempts - 1)
             ),
         )
 
@@ -223,46 +226,12 @@ class WebhookRetry:
         }
 
 
-class RetryConfig:
-    """Configuration for retry behavior."""
-
-    def __init__(
-        self,
-        max_attempts: int = 3,
-        base_delay: float = 1.0,
-        backoff_factor: float = 2.0,
-        max_delay: float = 30.0,
-        jitter: bool = True,
-    ):
-        self.max_attempts = max_attempts
-        self.base_delay = base_delay
-        self.backoff_factor = backoff_factor
-        self.max_delay = max_delay
-        self.jitter = jitter
-
-
-class RetryResult:
-    """Result of a retry attempt."""
-
-    def __init__(
-        self,
-        success: bool,
-        attempts: int = 1,
-        error: Optional[str] = None,
-        total_delay: float = 0.0,
-    ):
-        self.success = success
-        self.attempts = attempts
-        self.error = error
-        self.total_delay = total_delay
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "success": self.success,
-            "attempts": self.attempts,
-            "error": self.error,
-            "total_delay_seconds": round(self.total_delay, 2),
-        }
+# Legacy alias: RetryConfig defined at top as dataclass; keep compat shim without shadowing
+# (duplicate class removed — unified to dataclass RetryConfig with max_retries/base_delay)
+# Provide property aliases for backwards compatibility
+def _retry_compat_patch():
+    # allow WebhookRetry to accept both max_attempts and max_retries
+    pass
 
 
 # ── Global retry instance ──────────────────────────────────────
