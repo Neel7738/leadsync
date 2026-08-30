@@ -70,10 +70,30 @@ if "user" not in st.session_state:
 
 
 # ─── Authentication Gate ──────────────────────────────────────
+def _is_air_gapped_ui() -> bool:
+    try:
+        from core.config import get_settings
+        return bool(getattr(get_settings(), "air_gapped", False))
+    except Exception:
+        import os
+        return os.environ.get("AIR_GAPPED", "false").lower() == "true"
+
+def _robot_icon(width=96):
+    # Air-gapped: use local emoji/text instead of external icons8 CDN
+    if _is_air_gapped_ui():
+        import streamlit as _st
+        _st.markdown(f"<div style='font-size:{width}px;text-align:center;'>🤖</div>", unsafe_allow_html=True)
+    else:
+        import streamlit as _st
+        try:
+            _st.image("https://img.icons8.com/doodle/96/robot-2.png", width=width)
+        except Exception:
+            _st.markdown(f"<div style='font-size:{width}px;text-align:center;'>🤖</div>", unsafe_allow_html=True)
+
 def show_login_page():
     """Render the login page."""
     st.markdown("<div style='text-align:center; padding-top:80px;'>", unsafe_allow_html=True)
-    st.image("https://img.icons8.com/doodle/96/robot-2.png", width=96)
+    _robot_icon(96)
     st.title("AI Sales Follow-Up Agent")
     st.caption("Sign in to access the dashboard")
     st.markdown("</div>", unsafe_allow_html=True)
@@ -191,7 +211,7 @@ with st.sidebar:
 
     st.divider()
 
-    st.image("https://img.icons8.com/doodle/96/robot-2.png", width=48)
+    _robot_icon(48)
     st.title("Sales Follow-Up")
 
     # Navigation — admin-only pages
@@ -838,9 +858,12 @@ elif page == "👥 Users" and is_admin(user):
 
                     with col1:
                         st.markdown("**1. Scan this QR code with your authenticator app:**")
-                        # Generate QR code URL
+                        # Generate QR code locally (air-gapped safe) — falls back to Google only if local fails
                         totp = get_totp_manager()
-                        qr_url = totp.get_qr_code_url(uri)
+                        try:
+                            qr_url = totp.get_qr_code_data_uri(uri)
+                        except Exception:
+                            qr_url = totp.get_qr_code_url(uri)
                         st.image(qr_url, width=250, caption="Scan with Google Authenticator / Authy")
 
                     with col2:

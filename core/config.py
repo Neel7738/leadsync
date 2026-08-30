@@ -77,6 +77,8 @@ try:
         # Queue
         queue_max_items_per_rep: int = 50
         trusted_proxies: str = ""
+        # Air-gapped / offline mode — when true, no external network calls are made
+        air_gapped: bool = False
 
         # Security
         enforce_2fa_admin: bool = False
@@ -148,6 +150,8 @@ except ImportError:
             self.database_url: Optional[str] = os.environ.get("DATABASE_URL")
             self.enforce_2fa_admin: bool = os.environ.get("ENFORCE_2FA_ADMIN", "false").lower() == "true"
             self.enforce_2fa_rep: bool = os.environ.get("ENFORCE_2FA_REP", "false").lower() == "true"
+            self.air_gapped: bool = os.environ.get("AIR_GAPPED", "false").lower() == "true"
+            self.trusted_proxies: str = os.environ.get("TRUSTED_PROXIES", "")
 
             # 2FA Recovery
             self.recovery_link_ttl_hours: int = int(os.environ.get("RECOVERY_LINK_TTL_HOURS", "1"))

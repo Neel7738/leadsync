@@ -147,6 +147,15 @@ def transcribe_audio(
             full_text_parts = []
             detected_language = language or "en"
 
+            # Air-gapped: forbid external Whisper API
+            try:
+                from ..config import get_settings as _gs
+                if getattr(_gs(), "air_gapped", False) and use_api:
+                    raise RuntimeError("AIR_GAPPED: Whisper API disabled — use local Whisper")
+            except RuntimeError:
+                raise
+            except Exception:
+                pass
             if use_api:
                 result = _transcribe_via_api(processed_path, language, task)
                 return result
@@ -221,7 +230,15 @@ def _transcribe_via_api(
     language: Optional[str] = None,
     task: str = "transcribe",
 ) -> Dict[str, Any]:
-    """Use OpenAI Whisper API for transcription."""
+    """Use OpenAI Whisper API for transcription. Blocked in AIR_GAPPED."""
+    try:
+        from ..config import get_settings as _gs2
+        if getattr(_gs2(), "air_gapped", False):
+            raise RuntimeError("AIR_GAPPED: external Whisper API disabled")
+    except RuntimeError:
+        raise
+    except Exception:
+        pass
     try:
         import httpx
     except ImportError:

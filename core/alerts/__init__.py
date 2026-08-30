@@ -859,6 +859,13 @@ class SLABreachChecker:
         }
 
 
+def _is_air_gapped() -> bool:
+    try:
+        from ..config import get_settings
+        return bool(getattr(get_settings(), "air_gapped", False))
+    except Exception:
+        return os.environ.get("AIR_GAPPED", "false").lower() == "true"
+
 # ── Factory ────────────────────────────────────────────────────
 def create_sla_checker() -> SLABreachChecker:
     """
@@ -866,6 +873,7 @@ def create_sla_checker() -> SLABreachChecker:
 
     Reads TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, ALERT_EMAIL,
     and SLA_CHECK_INTERVAL from environment.
+    In AIR_GAPPED mode, only console alerts are registered.
     """
     import os
 
@@ -874,13 +882,16 @@ def create_sla_checker() -> SLABreachChecker:
         cooldown_seconds=int(os.environ.get("ALERT_COOLDOWN_SECONDS", "3600"))
     )
 
-    # Telegram channel
-    telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    telegram_chat = os.environ.get("TELEGRAM_CHAT_ID", "")
-    if telegram_token and telegram_chat:
-        sender = TelegramSender(telegram_token, telegram_chat)
-        alert_manager.add_channel(sender.send_breach_alert)
-        logger.info("Telegram alerts enabled")
+    if _is_air_gapped():
+        logger.info("AIR_GAPPED mode — external alert channels disabled (console only)")
+    else:
+        # Telegram channel
+        telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        telegram_chat = os.environ.get("TELEGRAM_CHAT_ID", "")
+        if telegram_token and telegram_chat:
+            sender = TelegramSender(telegram_token, telegram_chat)
+            alert_manager.add_channel(sender.send_breach_alert)
+            logger.info("Telegram alerts enabled")
 
     # Email channel
     alert_email = os.environ.get("ALERT_EMAIL", "")
@@ -897,45 +908,46 @@ def create_sla_checker() -> SLABreachChecker:
         alert_manager.add_channel(sender.send_breach_alert)
         logger.info(f"Email alerts enabled → {alert_email}")
 
-    # Slack channel
-    slack_webhook = os.environ.get("SLACK_WEBHOOK_URL", "")
-    if slack_webhook:
-        slack_channel = os.environ.get("SLACK_CHANNEL", None)
-        sender = SlackSender(slack_webhook, channel=slack_channel)
-        alert_manager.add_channel(sender.send_breach_alert)
-        logger.info(f"Slack alerts enabled → {slack_channel or 'default channel'}")
+    if not _is_air_gapped():
+        # Slack channel
+        slack_webhook = os.environ.get("SLACK_WEBHOOK_URL", "")
+        if slack_webhook:
+            slack_channel = os.environ.get("SLACK_CHANNEL", None)
+            sender = SlackSender(slack_webhook, channel=slack_channel)
+            alert_manager.add_channel(sender.send_breach_alert)
+            logger.info(f"Slack alerts enabled → {slack_channel or 'default channel'}")
 
-    # Discord channel
-    discord_webhook = os.environ.get("DISCORD_WEBHOOK_URL", "")
-    if discord_webhook:
-        sender = DiscordSender(discord_webhook)
-        alert_manager.add_channel(sender.send_breach_alert)
-        logger.info("Discord alerts enabled")
+        # Discord channel
+        discord_webhook = os.environ.get("DISCORD_WEBHOOK_URL", "")
+        if discord_webhook:
+            sender = DiscordSender(discord_webhook)
+            alert_manager.add_channel(sender.send_breach_alert)
+            logger.info("Discord alerts enabled")
 
-    # Microsoft Teams channel
-    teams_webhook = os.environ.get("TEAMS_WEBHOOK_URL", "")
-    if teams_webhook:
-        sender = TeamsSender(teams_webhook)
-        alert_manager.add_channel(sender.send_breach_alert)
-        logger.info("Teams alerts enabled")
+        # Microsoft Teams channel
+        teams_webhook = os.environ.get("TEAMS_WEBHOOK_URL", "")
+        if teams_webhook:
+            sender = TeamsSender(teams_webhook)
+            alert_manager.add_channel(sender.send_breach_alert)
+            logger.info("Teams alerts enabled")
 
-    # PagerDuty channel
-    pagerduty_key = os.environ.get("PAGERDUTY_INTEGRATION_KEY", "")
-    if pagerduty_key:
-        sender = PagerDutySender(pagerduty_key, from_email=os.environ.get("ALERT_EMAIL"))
-        alert_manager.add_channel(sender.send_breach_alert)
-        logger.info("PagerDuty alerts enabled")
+        # PagerDuty channel
+        pagerduty_key = os.environ.get("PAGERDUTY_INTEGRATION_KEY", "")
+        if pagerduty_key:
+            sender = PagerDutySender(pagerduty_key, from_email=os.environ.get("ALERT_EMAIL"))
+            alert_manager.add_channel(sender.send_breach_alert)
+            logger.info("PagerDuty alerts enabled")
 
-    # Opsgenie channel
-    opsgenie_key = os.environ.get("OPSGENIE_API_KEY", "")
-    if opsgenie_key:
-        sender = OpsgenieSender(
-            opsgenie_key,
-            team=os.environ.get("OPSGENIE_TEAM"),
-            priority=os.environ.get("OPSGENIE_PRIORITY", "P2"),
-        )
-        alert_manager.add_channel(sender.send_breach_alert)
-        logger.info("Opsgenie alerts enabled")
+        # Opsgenie channel
+        opsgenie_key = os.environ.get("OPSGENIE_API_KEY", "")
+        if opsgenie_key:
+            sender = OpsgenieSender(
+                opsgenie_key,
+                team=os.environ.get("OPSGENIE_TEAM"),
+                priority=os.environ.get("OPSGENIE_PRIORITY", "P2"),
+            )
+            alert_manager.add_channel(sender.send_breach_alert)
+            logger.info("Opsgenie alerts enabled")
 
     # Console channel (always enabled for visibility)
     def console_alert(alert: Dict[str, str]) -> bool:

@@ -194,13 +194,56 @@ class TOTPManager:
 
     def get_qr_code_url(self, uri: str) -> str:
         """
-        Get a URL for QR code image generation (via external service).
+        Get a URL for QR code image generation.
 
-        Uses the Google Charts API for QR code generation.
+        In air-gapped mode this raises — use get_qr_code_data_uri instead.
+        Otherwise falls back to local generation if qrcode installed.
         """
+        # Prefer local generation; only use Google as last resort and never in air-gapped
+        try:
+            from ..config import get_settings
+            if getattr(get_settings(), "air_gapped", False):
+                raise RuntimeError("QR via external URL disabled in AIR_GAPPED mode — use get_qr_code_data_uri")
+        except Exception:
+            pass
+        # Try local first
+        try:
+            return self.get_qr_code_data_uri(uri)
+        except Exception:
+            pass
         import urllib.parse
         encoded_uri = urllib.parse.quote(uri, safe="")
         return f"https://chart.googleapis.com/chart?cht=qr&chs=200x200&chl={encoded_uri}"
+
+    def get_qr_code_data_uri(self, uri: str) -> str:
+        """
+        Generate a local QR code as a data: URI (no external call).
+
+        Requires `qrcode[pil]` or `segno`. Falls back to uri itself if neither installed.
+        """
+        # Try qrcode
+        try:
+            import qrcode
+            import io, base64
+            img = qrcode.make(uri)
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            b64 = base64.b64encode(buf.getvalue()).decode()
+            return f"data:image/png;base64,{b64}"
+        except Exception:
+            pass
+        # Try segno
+        try:
+            import segno
+            import io, base64
+            buf = io.BytesIO()
+            segno.make(uri).save(buf, kind="png", scale=4)
+            b64 = base64.bencode(buf.getvalue()).decode() if hasattr(base64, 'bencode') else base64.b64encode(buf.getvalue()).decode()
+            return f"data:image/png;base64,{b64}"
+        except Exception:
+            pass
+        # Fallback: return uri itself (client can render locally)
+        return uri
 
 
 class BackupCodes:

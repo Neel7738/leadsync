@@ -154,7 +154,15 @@ class LLMManager:
         Route completion request through the provider hierarchy.
         Tries each provider in order; falls back to local Ollama.
         Raises RuntimeError only if ALL providers fail.
+        In AIR_GAPPED mode, only local Ollama is tried.
         """
+        # Air-gapped: skip all cloud providers
+        if getattr(self.settings, "air_gapped", False):
+            logger.info("AIR_GAPPED mode — only local Ollama will be tried")
+            result = self._call_ollama(self._make_ollama_cfg(), prompt, system_message, temperature, max_tokens)
+            if result:
+                return result
+            raise RuntimeError("AIR_GAPPED: local Ollama unavailable and cloud providers disabled")
         providers = self._get_provider_hierarchy(preferred_provider)
 
         last_error = None
