@@ -1016,8 +1016,11 @@ elif page == "🤖 LLM Status":
 
     settings = get_settings()
 
-    # Provider config
-    col1, col2 = st.columns(2)
+    # Provider config + AIR_GAPPED banner
+    is_air = bool(getattr(settings, "air_gapped", False))
+    if is_air:
+        st.warning("🔒 **AIR_GAPPED=true** — cloud providers (OpenAI/Anthropic/Google/Groq/NIM) are **disabled**. Only local Ollama will be tried. Pipeline drafts still work via deterministic templates, but *Test Generation* here needs Ollama. Turn off in **⚙️ Settings → Setup** to enable cloud (requires API keys).")
+    col1, col2, col3 = st.columns(3)
     with col1:
         st.markdown(f"**Configured Provider:** `{settings.llm_provider}`")
         st.markdown(f"**Ollama Host:** `{settings.ollama_host}`")
@@ -1028,6 +1031,20 @@ elif page == "🤖 LLM Status":
         except Exception:
             pass
         st.markdown(f"**Local Ollama:** {'🟢 Available' if local_ok else '🔴 Not Available'}")
+    with col3:
+        st.markdown(f"**Mode:** `{'AIR-GAPPED' if is_air else 'Online'}`")
+        if is_air:
+            if st.button("🔓 Disable AIR_GAPPED", key="llm_disable_air"):
+                try:
+                    from dotenv import set_key
+                    from pathlib import Path
+                    set_key(str(Path(__file__).parents[2]/".env"), "AIR_GAPPED", "false")
+                    from core.config import reload_settings
+                    reload_settings()
+                    st.success("AIR_GAPPED disabled — cloud enabled. Rerun Test Generation.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(str(e))
 
     st.divider()
 
@@ -1063,19 +1080,35 @@ elif page == "🤖 LLM Status":
     except Exception:
         st.info("Ollama not reachable.")
 
-    # Test generation
+    # Test generation + deterministic fallback demo
     st.divider()
     st.subheader("Test Generation")
+    st.caption("Pipeline **Process Conversation → drafts** always works via template fallback even if LLM is red. This tester hits raw LLM only.")
     test_prompt = st.text_input("Test prompt", value="Write a 1-sentence sales follow-up")
-    if st.button("🚀 Generate", type="primary"):
-        with st.spinner("Generating..."):
-            try:
-                result = llm_manager.generate(test_prompt, temperature=0.7, max_tokens=200)
-                st.success(f"**Provider:** {result.provider} ({result.model})")
-                st.markdown(f"**Response:** {result.content}")
-                st.caption(f"Latency: {result.latency:.2f}s | Tokens: {result.tokens_used or 'N/A'}")
-            except Exception as e:
-                st.error(f"Generation failed: {e}")
+    c1,c2 = st.columns(2)
+    with c1:
+        if st.button("🚀 Generate (LLM)", type="primary"):
+            with st.spinner("Generating..."):
+                try:
+                    result = llm_manager.generate(test_prompt, temperature=0.7, max_tokens=200)
+                    st.success(f"**Provider:** {result.provider} ({result.model})")
+                    st.markdown(f"**Response:** {result.content}")
+                    st.caption(f"Latency: {result.latency:.2f}s | Tokens: {result.tokens_used or 'N/A'}")
+                except Exception as e:
+                    msg = str(e)
+                    if "AIR_GAPPED" in msg and "Ollama unavailable" in msg:
+                        st.error("Generation failed: AIR_GAPPED + no Ollama. → **Fix:** Start Ollama (`ollama run llama3.2:1b`) **or** disable AIR_GAPPED in Settings → Setup, add OPENAI_API_KEY, then retry. Pipeline drafts still work via template — try **Process Conversation**.")
+                    else:
+                        st.error(f"Generation failed: {e}")
+                    st.info("Tip: `Ollama Host` above must be reachable. Install: https://ollama.com — then `ollama pull llama3.2:1b`")
+    with c2:
+        if st.button("🧪 Generate drafts (offline template)", key="llm_template"):
+            from core.models.conversation import Conversation
+            from core.generation.prompt import generate_drafts as _gd
+            conv = Conversation(source="email", participants=[{"name":"Test","email":"t@test.com"}], raw_text=test_prompt, urgency="medium")
+            drafts = _gd(conv, prospect_name="Test", use_llm=False)
+            st.success("Offline template drafts (no LLM needed):")
+            for k,v in drafts.items(): st.code(f"{k}: {v[:280]}", language=None)
 
 
 # ═══════════════════════════════════════════════════════════════
