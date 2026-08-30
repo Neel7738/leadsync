@@ -457,19 +457,39 @@ with st.sidebar:
 
      # Gmail connection status (visible to all)
     _gmail_configured = False
+     # Gmail account — Google-auth style card (always visible)
     _gmail_addr = ""
+    _gmail_initial = "?"
     try:
         _s = get_settings()
         _gmail_addr = (_s.imap_username or _s.smtp_username or "").strip()
         _gmail_configured = bool(_gmail_addr and _gmail_addr != "test@leadsync.local" and "@" in _gmail_addr)
-    except: pass
+        if _gmail_addr:
+            _gmail_initial = _gmail_addr[0].upper()
+    except:
+        _gmail_configured = False
     if _gmail_configured:
-        st.markdown(f"<div style='background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:0.82rem;color:#047857;'>✅ Gmail: <strong>{_gmail_addr}</strong><br>→ watches this inbox</div>", unsafe_allow_html=True)
+        st.markdown(f"""
+        <div style='background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:12px;display:flex;align-items:center;gap:10px;margin-bottom:14px;'>
+            <div style='width:36px;height:36px;border-radius:50%;background:#4285F4;color:white;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;flex-shrink:0;'>{_gmail_initial}</div>
+            <div style='flex:1;overflow:hidden;'>
+                <div style='font-size:0.82rem;color:#64748b;'>Signed in as</div>
+                <div style='font-size:0.88rem;font-weight:600;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' title='{_gmail_addr}'>{_gmail_addr}</div>
+                <div style='font-size:0.75rem;color:#059669;'>● Connected — watching this inbox</div>
+            </div>
+            <div style='width:20px;height:20px;border-radius:50%;background:#dcfce7;display:flex;align-items:center;justify-content:center;font-size:12px;'>✓</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.caption("Manage in **⚙️ Settings → Setup**")
     else:
-        st.markdown("<div style='background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:0.82rem;color:#92400e;'>⚠️ Gmail not connected<br>→ this inbox will be watched</div>", unsafe_allow_html=True)
-        if st.button("🔗 Connect Gmail", use_container_width=True, key="btn_connect_gmail_sidebar"):
-            st.session_state["_nav_target"] = "⚙️ Settings"
-            st.rerun()
+        st.markdown("""
+        <div style='background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:14px;text-align:center;margin-bottom:14px;'>
+            <div style='width:40px;height:40px;border-radius:50%;background:#f1f5f9;display:flex;align-items:center;justify-content:center;margin:0 auto 8px;font-size:20px;'>👤</div>
+            <div style='font-size:0.88rem;font-weight:600;color:#0f172a;'>No Gmail connected</div>
+            <div style='font-size:0.78rem;color:#64748b;margin-top:4px;'>Sign in to choose which inbox to watch</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.info("Go to **⚙️ Settings → Setup (first tab)** to connect your Gmail — like Google Sign-In")
 
     # Grouped SaaS Navigation (modern, air-gapped safe — no external icons)
     st.markdown('<div class="nav-header">MAIN</div>', unsafe_allow_html=True)
@@ -485,13 +505,6 @@ with st.sidebar:
         admin_pages.append("👥 Users")
 
     all_pages = main_pages + monitoring_pages + admin_pages
-    # allow sidebar button to force nav
-    if "_nav_target" in st.session_state and st.session_state["_nav_target"] in all_pages:
-        _forced = st.session_state.pop("_nav_target")
-        page = _forced
-        st.session_state["_forced_page"] = _forced
-    elif "_forced_page" in st.session_state and st.session_state["_forced_page"] in all_pages:
-        page = st.session_state["_forced_page"]
     page = st.radio(
         "Navigation",
         all_pages,
@@ -631,17 +644,30 @@ if page == "📊 Dashboard":
         _g_ok = False
         _g = ""
     if not _g_ok:
-        st.warning("⚠️ **Gmail not connected** — LeadSync doesn't know which inbox to watch. → Go to **⚙️ Settings → Setup** (first tab) and connect the Gmail you want it to work on. Then click **Test IMAP**.")
-        c1,c2 = st.columns([1,3])
-        with c1:
-            if st.button("🔗 Connect Gmail now", type="primary", key="dash_connect"):
-                st.session_state["_nav_target"] = "⚙️ Settings"
-                st.rerun()
-        with c2:
-            st.caption("This inbox will be watched for auto follow-ups. Use a Gmail App Password (16-char).")
+        st.markdown("""
+        <div style='background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:16px;margin-bottom:16px;display:flex;align-items:center;gap:14px;'>
+            <div style='width:44px;height:44px;border-radius:50%;background:#f59e0b;color:white;display:flex;align-items:center;justify-content:center;font-size:20px;'>⚠️</div>
+            <div style='flex:1;'>
+                <div style='font-weight:700;color:#92400e;'>Gmail not connected</div>
+                <div style='font-size:0.85rem;color:#78350f;'>LeadSync doesn't know which inbox to watch. Go to <strong>⚙️ Settings → Setup</strong> and sign in like Google Auth.</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.caption("This inbox will be watched for auto follow-ups. Use a Gmail App Password (16-char).")
         st.divider()
     else:
-        st.success(f"✅ **Watching inbox:** `{_g}` — new emails will be scored & queued. Manage in **⚙️ Settings**.")
+        _g_initial = _g[0].upper() if _g else "G"
+        st.markdown(f"""
+        <div style='background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:14px;display:flex;align-items:center;gap:12px;margin-bottom:16px;'>
+            <div style='width:40px;height:40px;border-radius:50%;background:#4285F4;color:white;display:flex;align-items:center;justify-content:center;font-weight:700;'> {_g_initial} </div>
+            <div style='flex:1;'>
+                <div style='font-size:0.82rem;color:#64748b;'>Watching inbox — like Google Auth</div>
+                <div style='font-weight:600;color:#0f172a;'>{_g}</div>
+                <div style='font-size:0.78rem;color:#059669;'>● Connected and polling</div>
+            </div>
+            <div style='font-size:0.75rem;color:#64748b;'>Manage in<br><strong>⚙️ Settings</strong></div>
+        </div>
+        """, unsafe_allow_html=True)
 
     # SLA Breach Banner Alert
     breached = queue.get_breached()
@@ -1063,12 +1089,9 @@ elif page == "⚙️ Settings":
     tab0, tab1, tab2, tab3 = st.tabs(["⚙️ Setup (Gmail/LLM)", "🔧 Configuration", "📧 Suppressions", "📊 Recency Decay"])
 
     with tab0:
-        st.subheader("Web Setup — Gmail, LLM, Air-gapped")
-        st.caption("Fill once, save to `.env`, auto-reload — no terminal editing. `python main.py` already started API+UI.")
         import os as _os
         from pathlib import Path as _P
         env_path = _P(__file__).parents[2] / ".env"
-        # load current
         cur = {k: getattr(settings, k, "") for k in ["imap_username","smtp_username","llm_provider","air_gapped"]}
         cur_env = {}
         try:
@@ -1077,6 +1100,56 @@ elif page == "⚙️ Settings":
                     k,v=line.split("=",1)
                     cur_env[k.strip()]=v.strip()
         except: pass
+        # Google-auth style connected account header (shows what gmail is already connected)
+        _setup_gmail = (cur_env.get("IMAP_USERNAME") or getattr(settings, "imap_username", "") or cur_env.get("SMTP_USERNAME") or "").strip()
+        _setup_ok = bool(_setup_gmail and _setup_gmail != "test@leadsync.local" and "@" in _setup_gmail)
+        if _setup_ok:
+            _init = _setup_gmail[0].upper()
+            st.markdown(f"""
+            <div style='background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;padding:16px;display:flex;align-items:center;gap:14px;margin-bottom:14px;'>
+                <div style='width:48px;height:48px;border-radius:50%;background:#4285F4;color:white;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;'>{_init}</div>
+                <div style='flex:1;'>
+                    <div style='font-size:0.80rem;color:#64748b;'>Signed in with Google — watching</div>
+                    <div style='font-weight:700;color:#0f172a;font-size:1rem;'>{_setup_gmail}</div>
+                    <div style='font-size:0.80rem;color:#059669;'>● Connected — this inbox is being polled</div>
+                </div>
+                <div style='text-align:right;'>
+                    <div style='font-size:0.75rem;color:#64748b;'>Provider</div>
+                    <div style='font-weight:600;color:#0f172a;'>Gmail IMAP</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            c1,c2,c3 = st.columns([1,1,1])
+            with c1:
+                if st.button("🔄 Refresh status", key="setup_refresh"):
+                    st.rerun()
+            with c2:
+                if st.button("🔀 Switch account", key="setup_switch"):
+                    st.info("Enter new Gmail below and Save — it will replace the watched inbox")
+            with c3:
+                if st.button("🚪 Disconnect", key="setup_disconnect"):
+                    try:
+                        from dotenv import set_key
+                        set_key(str(env_path), "IMAP_USERNAME", "")
+                        set_key(str(env_path), "SMTP_USERNAME", "")
+                        from core.config import reload_settings
+                        reload_settings()
+                        st.success("Disconnected — no inbox watched")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(str(e))
+            st.divider()
+        else:
+            st.markdown("""
+            <div style='background:#f8fafc;border:1px dashed #cbd5e1;border-radius:14px;padding:20px;text-align:center;margin-bottom:14px;'>
+                <div style='font-size:28px;'>🔐</div>
+                <div style='font-weight:700;color:#0f172a;margin-top:6px;'>Connect your Gmail — like Google Sign-In</div>
+                <div style='font-size:0.85rem;color:#64748b;'>Choose which Gmail LeadSync should work on. We'll show it here once connected.</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.subheader("Connect Gmail — which inbox to watch")
+        st.caption("This is like Google Sign-In — enter the Gmail you want LeadSync to work on.")
 
         c1,c2 = st.columns(2)
         with c1:
