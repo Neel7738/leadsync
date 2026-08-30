@@ -68,6 +68,12 @@ try:
         # Tracking base URL
         tracking_base_url: str = "https://yourdomain.com/track"
 
+        # Gmail OAuth (like Macro — Sign in with Google)
+        google_client_id: Optional[str] = None
+        google_client_secret: Optional[str] = None
+        google_redirect_uri: str = "http://localhost:8000/auth/google/callback"
+        gmail_token_path: str = "data/gmail_token.json"
+
         # Redis (optional)
         use_redis: bool = False
         redis_url: str = "redis://localhost:6379"
@@ -145,6 +151,10 @@ except ImportError:
             self.metrics_port: int = int(os.environ.get("METRICS_PORT", "9090"))
 
             self.tracking_base_url: str = os.environ.get("TRACKING_BASE_URL", "https://yourdomain.com/track")
+            self.google_client_id: Optional[str] = os.environ.get("GOOGLE_CLIENT_ID")
+            self.google_client_secret: Optional[str] = os.environ.get("GOOGLE_CLIENT_SECRET")
+            self.google_redirect_uri: str = os.environ.get("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/google/callback")
+            self.gmail_token_path: str = os.environ.get("GMAIL_TOKEN_PATH", "data/gmail_token.json")
             self.use_redis: bool = os.environ.get("USE_REDIS", "false").lower() == "true"
             self.redis_url: str = os.environ.get("REDIS_URL", "redis://localhost:6379")
             self.database_url: Optional[str] = os.environ.get("DATABASE_URL")

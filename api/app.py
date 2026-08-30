@@ -98,6 +98,10 @@ class GmailPoller:
 
     def _is_configured(self) -> bool:
         try:
+            from core.ingest.gmail_api import is_connected as _oa
+            if _oa(): return True
+        except: pass
+        try:
             from core.config import get_settings
             s = get_settings()
             if getattr(s, "air_gapped", False):
@@ -108,6 +112,23 @@ class GmailPoller:
         except: return False
 
     def poll_once(self) -> dict:
+        # OAuth first
+        try:
+            from core.ingest.gmail_api import is_connected, fetch_via_api
+            if is_connected():
+                from core.intelligence.scorer import score_prospect
+                from core.queue import get_queue
+                convs = fetch_via_api(limit=10)
+                q=get_queue()
+                for c in convs:
+                    try: q.add(score_prospect(c))
+                    except: pass
+                self.last_run = __import__("datetime").datetime.utcnow().isoformat()
+                self.last_fetched=len(convs); self.runs+=1
+                logger.info(f"Gmail poll via OAuth: {len(convs)}")
+                return {"fetched": len(convs), "queued": len(convs), "via": "gmail_api"}
+        except Exception as e:
+            logger.warning(f"Gmail OAuth poll failed: {e}")
         if not self._is_configured():
             return {"skipped": True, "reason": "Gmail not configured or AIR_GAPPED"}
         try:
@@ -1180,13 +1201,64 @@ async def gmail_status() -> Dict[str, Any]:
         s = get_settings()
         cfg = bool((getattr(s, "imap_username","") or "").strip() and "@" in getattr(s, "imap_username",""))
         gmail = getattr(s, "imap_username","") or getattr(s, "smtp_username","")
+        # also check OAuth
+        try:
+            from core.ingest.gmail_api import is_connected as _oa, get_connected_email as _ge
+            if _oa():
+                cfg=True; gmail=_ge() or gmail
+                oauth=True
+            else: oauth=False
+        except: oauth=False
     except:
-        cfg=False; gmail=""
-    return {"configured": cfg, "gmail": gmail, "air_gapped": getattr(__import__("core.config", fromlist=["get_settings"]).get_settings(), "air_gapped", False), "interval": poller.interval, "last_run": poller.last_run, "last_fetched": poller.last_fetched, "runs": poller.runs, "alive": poller._thread.is_alive() if poller._thread else False}
+        cfg=False; gmail=""; oauth=False
+    return {"configured": cfg, "gmail": gmail, "oauth_connected": oauth, "air_gapped": getattr(__import__("core.config", fromlist=["get_settings"]).get_settings(), "air_gapped", False), "interval": poller.interval, "last_run": poller.last_run, "last_fetched": poller.last_fetched, "runs": poller.runs, "alive": poller._thread.is_alive() if poller._thread else False}
 
 @app.post("/gmail/poll", tags=["gmail"])
 async def gmail_poll_now() -> Dict[str, Any]:
+    # try OAuth first, then IMAP
+    try:
+        from core.ingest.gmail_api import is_connected, fetch_via_api
+        if is_connected():
+            from core.intelligence.scorer import score_prospect
+            from core.queue import get_queue
+            convs = fetch_via_api(limit=10)
+            q=get_queue()
+            for c in convs:
+                try: q.add(score_prospect(c))
+                except: pass
+            return {"fetched": len(convs), "queued": len(convs), "via": "gmail_api"}
+    except Exception as e:
+        pass
     return get_gmail_poller().poll_once()
+
+@app.get("/auth/google/url", tags=["auth"])
+async def google_auth_url() -> Dict[str, Any]:
+    from core.ingest.gmail_api import get_auth_url
+    try:
+        url = get_auth_url()
+        return {"url": url}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/auth/google/callback", tags=["auth"])
+async def google_callback(code: str = Query(...)) -> Dict[str, Any]:
+    from core.ingest.gmail_api import handle_callback
+    try:
+        data = handle_callback(code)
+        return {"connected": True, "email": data.get("email"), "message": f"Gmail connected as {data.get('email')}"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/auth/google/status", tags=["auth"])
+async def google_status() -> Dict[str, Any]:
+    from core.ingest.gmail_api import is_connected, get_connected_email
+    return {"connected": is_connected(), "email": get_connected_email()}
+
+@app.post("/auth/google/disconnect", tags=["auth"])
+async def google_disconnect() -> Dict[str, Any]:
+    from core.ingest.gmail_api import disconnect
+    disconnect()
+    return {"disconnected": True}
 
 # ========== SLA Breach Checker ==========
 

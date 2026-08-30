@@ -496,6 +496,12 @@ def send_email(
     settings = get_settings()
     if getattr(settings, "air_gapped", False):
         return {"status": "queued_offline", "message": "AIR_GAPPED: email queued locally, not sent", "to": to_address, "subject": subject, "timestamp": datetime.utcnow().isoformat()}
+    # Try Gmail API if OAuth connected
+    try:
+        from .gmail_api import is_connected, send_via_api
+        if is_connected():
+            return send_via_api(to_address, subject, body)
+    except: pass
 
     smtp_h = smtp_host or settings.smtp_host
     smtp_p = smtp_port or settings.smtp_port

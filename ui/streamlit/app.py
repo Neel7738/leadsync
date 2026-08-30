@@ -1133,22 +1133,30 @@ elif page == "⚙️ Settings":
                     k,v=line.split("=",1)
                     cur_env[k.strip()]=v.strip()
         except: pass
-        # Google-auth style connected account header (shows what gmail is already connected)
-        _setup_gmail = (cur_env.get("IMAP_USERNAME") or getattr(settings, "imap_username", "") or cur_env.get("SMTP_USERNAME") or "").strip()
+        # Google-auth style connected account header — check OAuth first, then IMAP
+        _oauth_email = ""
+        _oauth_connected = False
+        try:
+            from core.ingest.gmail_api import is_connected as _oa, get_connected_email as _ge
+            _oauth_connected = _oa()
+            _oauth_email = _ge() or ""
+        except: pass
+        _setup_gmail = (_oauth_email or cur_env.get("IMAP_USERNAME") or getattr(settings, "imap_username", "") or cur_env.get("SMTP_USERNAME") or "").strip()
         _setup_ok = bool(_setup_gmail and _setup_gmail != "test@leadsync.local" and "@" in _setup_gmail)
+        _via = "Gmail API (OAuth)" if _oauth_connected else "Gmail IMAP"
         if _setup_ok:
             _init = _setup_gmail[0].upper()
             st.markdown(f"""
             <div style='background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;padding:16px;display:flex;align-items:center;gap:14px;margin-bottom:14px;'>
                 <div style='width:48px;height:48px;border-radius:50%;background:#4285F4;color:white;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;'>{_init}</div>
                 <div style='flex:1;'>
-                    <div style='font-size:0.80rem;color:#64748b;'>Signed in with Google — watching</div>
+                    <div style='font-size:0.80rem;color:#64748b;'>Signed in with Google — watching via {_via}</div>
                     <div style='font-weight:700;color:#0f172a;font-size:1rem;'>{_setup_gmail}</div>
                     <div style='font-size:0.80rem;color:#059669;'>● Connected — this inbox is being polled</div>
                 </div>
                 <div style='text-align:right;'>
                     <div style='font-size:0.75rem;color:#64748b;'>Provider</div>
-                    <div style='font-weight:600;color:#0f172a;'>Gmail IMAP</div>
+                    <div style='font-weight:600;color:#0f172a;'>{"OAuth" if _oauth_connected else "IMAP"}</div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -1165,6 +1173,11 @@ elif page == "⚙️ Settings":
                         from dotenv import set_key
                         set_key(str(env_path), "IMAP_USERNAME", "")
                         set_key(str(env_path), "SMTP_USERNAME", "")
+                        # also clear OAuth token
+                        try:
+                            from core.ingest.gmail_api import disconnect as _gdisc
+                            _gdisc()
+                        except: pass
                         from core.config import reload_settings
                         reload_settings()
                         st.success("Disconnected — no inbox watched")
@@ -1173,13 +1186,36 @@ elif page == "⚙️ Settings":
                         st.error(str(e))
             st.divider()
         else:
-            st.markdown("""
-            <div style='background:#f8fafc;border:1px dashed #cbd5e1;border-radius:14px;padding:20px;text-align:center;margin-bottom:14px;'>
-                <div style='font-size:28px;'>🔐</div>
-                <div style='font-weight:700;color:#0f172a;margin-top:6px;'>Connect your Gmail — like Google Sign-In</div>
-                <div style='font-size:0.85rem;color:#64748b;'>Choose which Gmail LeadSync should work on. We'll show it here once connected.</div>
-            </div>
-            """, unsafe_allow_html=True)
+            # Check if OAuth client configured
+            _oauth_ready = bool(cur_env.get("GOOGLE_CLIENT_ID") or getattr(settings, "google_client_id", None))
+            if _oauth_ready:
+                st.markdown("""
+                <div style='background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;padding:18px;text-align:center;margin-bottom:14px;'>
+                    <div style='font-weight:700;color:#0f172a;'>Sign in with Google — like Macro</div>
+                    <div style='font-size:0.85rem;color:#64748b;margin-top:4px;'>One click, no App password. We use Gmail API (read + send).</div>
+                </div>
+                """, unsafe_allow_html=True)
+                if st.button("🔐 Sign in with Google", type="primary", use_container_width=True, key="setup_google_signin"):
+                    try:
+                        import httpx
+                        r = httpx.get("http://localhost:8000/auth/google/url", timeout=5)
+                        url = r.json().get("url", "")
+                        if url:
+                            st.link_button("Continue to Google →", url, use_container_width=True)
+                            st.caption("After Google, you'll be redirected back and this card will show your Gmail.")
+                        else: st.error("Failed to get auth URL")
+                    except Exception as e:
+                        st.error(f"Need API running + GOOGLE_CLIENT_ID set: {e}")
+                        st.info("Or use App password below")
+            else:
+                st.markdown("""
+                <div style='background:#f8fafc;border:1px dashed #cbd5e1;border-radius:14px;padding:20px;text-align:center;margin-bottom:14px;'>
+                    <div style='font-size:28px;'>🔐</div>
+                    <div style='font-weight:700;color:#0f172a;margin-top:6px;'>Connect your Gmail — like Google Sign-In</div>
+                    <div style='font-size:0.85rem;color:#64748b;'>Choose which Gmail LeadSync should work on. We'll show it here once connected.</div>
+                </div>
+                """, unsafe_allow_html=True)
+                st.caption("Tip: Add `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` to `.env` for one-click Google Sign-In (like Macro). Else use App password below.")
 
         st.subheader("Connect Gmail — which inbox to watch")
         st.caption("This is like Google Sign-In — enter the Gmail you want LeadSync to work on.")
