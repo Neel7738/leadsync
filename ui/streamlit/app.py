@@ -79,16 +79,13 @@ def _is_air_gapped_ui() -> bool:
         return os.environ.get("AIR_GAPPED", "false").lower() == "true"
 
 def _robot_icon(width=96):
-    # Air-gapped: use local emoji/text instead of external icons8 CDN
+    # Air-gapped: never hit icons8 CDN
     if _is_air_gapped_ui():
         import streamlit as _st
         _st.markdown(f"<div style='font-size:{width}px;text-align:center;'>🤖</div>", unsafe_allow_html=True)
-    else:
-        import streamlit as _st
-        try:
-            _st.image("https://img.icons8.com/doodle/96/robot-2.png", width=width)
-        except Exception:
-            _st.markdown(f"<div style='font-size:{width}px;text-align:center;'>🤖</div>", unsafe_allow_html=True)
+        return
+    import streamlit as _st
+    _st.markdown(f"<div style='font-size:{width}px;text-align:center;'>🤖</div>", unsafe_allow_html=True)
 
 def show_login_page():
     """Render the login page."""

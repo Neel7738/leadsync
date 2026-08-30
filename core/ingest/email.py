@@ -225,6 +225,14 @@ def _parse_email_address(header_value: str) -> List[Dict[str, str]]:
     return participants
 
 
+def _is_air_gapped() -> bool:
+    try:
+        from ..config import get_settings
+        return bool(getattr(get_settings(), "air_gapped", False))
+    except Exception:
+        import os
+        return os.environ.get("AIR_GAPPED", "false").lower() == "true"
+
 def fetch_emails(
     imap_host: str,
     imap_port: int,
@@ -239,7 +247,10 @@ def fetch_emails(
 
     Handles: auth failures, empty mailboxes, non-UTF8 encoding,
     multipart messages, missing participants.
+    In AIR_GAPPED mode, raises RuntimeError immediately (no external call).
     """
+    if _is_air_gapped():
+        raise RuntimeError("AIR_GAPPED: IMAP fetch disabled — no outside world")
     conversations: List[Conversation] = []
 
     try:
@@ -483,6 +494,8 @@ def send_email(
     """
     from ..config import get_settings
     settings = get_settings()
+    if getattr(settings, "air_gapped", False):
+        return {"status": "queued_offline", "message": "AIR_GAPPED: email queued locally, not sent", "to": to_address, "subject": subject, "timestamp": datetime.utcnow().isoformat()}
 
     smtp_h = smtp_host or settings.smtp_host
     smtp_p = smtp_port or settings.smtp_port

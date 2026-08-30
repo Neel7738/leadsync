@@ -231,6 +231,13 @@ def send_recovery_email(
             "from_address": getattr(settings, "email_sending_domain", "sfa@yourcompany.com"),
         }
 
+    # Air-gapped: never try SMTP
+    try:
+        from ..config import get_settings as _gs2
+        if getattr(_gs2(), "air_gapped", False):
+            return {"error": "AIR_GAPPED: email not sent", "success": False, "send_mode": "manual", "manual_link": recovery_link}
+    except Exception:
+        pass
     if not smtp_config.get("username") or not smtp_config.get("password"):
         return {"error": "SMTP not configured", "success": False, "send_mode": "manual"}
 

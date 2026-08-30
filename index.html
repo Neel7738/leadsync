@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>LeadSync — Autonomous Sales Follow-Up Platform</title>
 <style>
-/* Air-gapped: fonts self-contained fallback — Google Fonts only if online */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* Air-gapped: no external font fetch — system fonts fallback. Online can uncomment Google Fonts */
+ /* @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap'); */
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -758,9 +758,9 @@ footer a { color: var(--primary-light); text-decoration: none; }
   </p>
 </footer>
 
-<!-- Three.js — CDN with local fallback for air-gapped -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script>if(typeof THREE==='undefined'){document.write('<script src=\"assets/three.min.js\"><\/script>')};</script>
+<!-- Three.js — air-gapped: local only. For online, uncomment CDN line above local -->
+<script src="assets/three.min.js"></script>
+<script>if(typeof THREE==='undefined'){var s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';document.head.appendChild(s);}</script>
 <script>
 // ── 3D Particle System ──
 const canvas = document.getElementById('three-canvas');
