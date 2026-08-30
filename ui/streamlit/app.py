@@ -1015,15 +1015,90 @@ elif page == "⚙️ Settings":
 
     settings = get_settings()
 
-    tab1, tab2, tab3 = st.tabs(["🔧 Configuration", "📧 Suppressions", "📊 Recency Decay"])
+    tab0, tab1, tab2, tab3 = st.tabs(["⚙️ Setup (Gmail/LLM)", "🔧 Configuration", "📧 Suppressions", "📊 Recency Decay"])
+
+    with tab0:
+        st.subheader("Web Setup — Gmail, LLM, Air-gapped")
+        st.caption("Fill once, save to `.env`, auto-reload — no terminal editing. `python main.py` already started API+UI.")
+        import os as _os
+        from pathlib import Path as _P
+        env_path = _P(__file__).parents[2] / ".env"
+        # load current
+        cur = {k: getattr(settings, k, "") for k in ["imap_username","smtp_username","llm_provider","air_gapped"]}
+        cur_env = {}
+        try:
+            for line in env_path.read_text().splitlines():
+                if "=" in line and not line.strip().startswith("#"):
+                    k,v=line.split("=",1)
+                    cur_env[k.strip()]=v.strip()
+        except: pass
+
+        c1,c2 = st.columns(2)
+        with c1:
+            st.markdown("**Gmail IMAP**")
+            imap_user = st.text_input("Gmail address", value=cur_env.get("IMAP_USERNAME", cur.get("imap_username") or ""), placeholder="you@gmail.com", key="setup_imap_user")
+            imap_pass = st.text_input("App password (16-char)", type="password", value="", placeholder="abcd efgh ijkl mnop", key="setup_imap_pass", help="Google Account → Security → App passwords")
+            st.markdown("**Gmail SMTP** (usually same)")
+            smtp_user = st.text_input("SMTP user", value=cur_env.get("SMTP_USERNAME", cur.get("smtp_username") or ""), placeholder="you@gmail.com", key="setup_smtp_user")
+            smtp_pass = st.text_input("SMTP app password", type="password", value="", placeholder="same as above", key="setup_smtp_pass")
+        with c2:
+            st.markdown("**LLM & Mode**")
+            llm_provider = st.selectbox("LLM Provider", ["ollama","openai","anthropic","google","groq","nim"], index=["ollama","openai","anthropic","google","groq","nim"].index(cur_env.get("LLM_PROVIDER", cur.get("llm_provider") or "ollama")) if cur_env.get("LLM_PROVIDER", cur.get("llm_provider") or "ollama") in ["ollama","openai","anthropic","google","groq","nim"] else 0, key="setup_llm")
+            air_gapped = st.checkbox("AIR_GAPPED (offline, no outside calls)", value=str(cur_env.get("AIR_GAPPED","false")).lower()=="true", key="setup_air")
+            openai_key = st.text_input("OPENAI_API_KEY (if LLM=openai)", type="password", value="••••" if cur_env.get("OPENAI_API_KEY") else "", key="setup_oai")
+            st.caption("Ollama default `llama3.1:8b` works offline if `ollama` is running")
+        if st.button("💾 Save to .env & Reload", type="primary", key="setup_save"):
+            try:
+                from dotenv import set_key
+                set_key(str(env_path), "IMAP_USERNAME", imap_user)
+                if imap_pass: set_key(str(env_path), "IMAP_PASSWORD", imap_pass.replace(" ",""))
+                set_key(str(env_path), "SMTP_USERNAME", smtp_user or imap_user)
+                if smtp_pass or imap_pass: set_key(str(env_path), "SMTP_PASSWORD", (smtp_pass or imap_pass).replace(" ",""))
+                set_key(str(env_path), "IMAP_HOST", "imap.gmail.com")
+                set_key(str(env_path), "SMTP_HOST", "smtp.gmail.com")
+                set_key(str(env_path), "LLM_PROVIDER", llm_provider)
+                if openai_key and openai_key!="••••": set_key(str(env_path), "OPENAI_API_KEY", openai_key)
+                set_key(str(env_path), "AIR_GAPPED", "true" if air_gapped else "false")
+                from core.config import reload_settings
+                reload_settings()
+                st.success("Saved to .env — reloaded. Test IMAP/SMTP with buttons below.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Save failed: {e} — ensure python-dotenv is installed")
+        c1,c2 = st.columns(2)
+        with c1:
+            if st.button("🔍 Test IMAP", key="setup_test_imap"):
+                try:
+                    from core.ingest.email import fetch_emails
+                    n = len(fetch_emails("imap.gmail.com",993,imap_user,imap_pass or cur_env.get("IMAP_PASSWORD",""),limit=1))
+                    st.success(f"IMAP OK — fetched {n} sample")
+                except Exception as e:
+                    st.error(f"IMAP failed: {e}")
+        with c2:
+            if st.button("📧 Test SMTP", key="setup_test_smtp"):
+                try:
+                    from core.ingest.email import send_email
+                    r = send_email("test@leadsync.local","LeadSync test","Hello from Web Setup",smtp_username=smtp_user or imap_user, smtp_password=(smtp_pass or imap_pass or cur_env.get("SMTP_PASSWORD","")).replace(" ",""))
+                    st.json(r)
+                except Exception as e:
+                    st.error(f"SMTP failed: {e}")
 
     with tab1:
-        st.subheader("Current Configuration")
-        config = settings.get_all_config() if hasattr(settings, "get_all_config") else {}
+        st.subheader("Current Configuration (read-only)")
+        config = {}
+        try:
+            config = settings.get_all_config() if hasattr(settings, "get_all_config") else {}
+        except: pass
+        if not config:
+            # fallback show env file raw
+            try:
+                config = {l.split("=",1)[0]: l.split("=",1)[1] for l in Path(__file__).parents[2].joinpath(".env").read_text().splitlines() if "=" in l and not l.strip().startswith("#")}
+            except: pass
         for key, value in sorted(config.items()):
+            # mask secrets
+            if any(k in key.lower() for k in ["password","api_key","token"]):
+                value = "••••" if value else ""
             st.markdown(f"**{key}:** `{value}`")
-
-        st.info("Configuration is loaded from environment variables and `.env` file. Edit `.env` and restart to change.")
 
     with tab2:
         st.subheader("Email Suppression List")

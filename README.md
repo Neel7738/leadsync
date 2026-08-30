@@ -202,29 +202,24 @@ leadsync/
 ### Installation
 
 ```bash
-# Clone the repository
+# Clone
 git clone https://github.com/demolished-lab/leadsync.git
 cd leadsync
-
-# Install with development dependencies
-pip install -e ".[dev]"
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your API keys and settings
+pip install -e .
 ```
 
-### Running
+### Running — one command
 
 ```bash
-# Start the API server
+python main.py
+# → API http://localhost:8000/docs + UI http://localhost:8501 auto-start
+# All Gmail / LLM / Air-gapped setup via Web UI: Settings (no .env editing needed)
+```
+
+**Manual (alternative):**
+```bash
 uvicorn api.app:app --host 0.0.0.0 --port 8000
-
-# Start the dashboard (in a separate terminal)
-streamlit run ui/streamlit/app.py
-
-# Open the API docs
-open http://localhost:8000/docs
+streamlit run ui/streamlit/app.py  # second terminal
 ```
 
 ### Docker
