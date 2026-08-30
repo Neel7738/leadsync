@@ -1025,28 +1025,36 @@ elif page == "🤖 LLM Status":
         st.markdown(f"**Configured Provider:** `{settings.llm_provider}`")
         st.markdown(f"**Ollama Host:** `{settings.ollama_host}`")
     with col2:
+        # Real-time check — bypass 5s cache for UI
         local_ok = False
         try:
+            llm_manager._available_ollama_models = None
             local_ok = llm_manager.is_local_available()
         except Exception:
             pass
         st.markdown(f"**Local Ollama:** {'🟢 Available' if local_ok else '🔴 Not Available'}")
+        if local_ok:
+            st.caption("Auto-detected in real-time — no save needed")
     with col3:
-        st.markdown(f"**Mode:** `{'AIR-GAPPED' if is_air else 'Online'}`")
-        if is_air:
-            if st.button("🔓 Disable AIR_GAPPED", key="llm_disable_air"):
+        st.markdown(f"**Mode:** `{'AIR-GAPPED' if is_air else 'Online (auto)'}`")
+        if is_air and not local_ok:
+            if st.button("🔓 Auto-fix: Use cloud", key="llm_disable_air"):
                 try:
                     from dotenv import set_key
                     from pathlib import Path
                     set_key(str(Path(__file__).parents[2]/".env"), "AIR_GAPPED", "false")
                     from core.config import reload_settings
                     reload_settings()
-                    st.success("AIR_GAPPED disabled — cloud enabled. Rerun Test Generation.")
+                    st.success("Auto-fix: AIR_GAPPED disabled. Rerun Generate.")
                     st.rerun()
                 except Exception as e:
                     st.error(str(e))
+        elif is_air and local_ok:
+            st.caption("✅ AIR_GAPPED + Ollama = fully local, auto")
 
     st.divider()
+    # auto-refresh hint
+    st.caption("Status refreshes in real-time (5s cache). If you just started Ollama, wait 5s and click Rerun.")
 
     # Health report
     st.subheader("Provider Health")
@@ -1097,10 +1105,33 @@ elif page == "🤖 LLM Status":
                 except Exception as e:
                     msg = str(e)
                     if "AIR_GAPPED" in msg and "Ollama unavailable" in msg:
-                        st.error("Generation failed: AIR_GAPPED + no Ollama. → **Fix:** Start Ollama (`ollama run llama3.2:1b`) **or** disable AIR_GAPPED in Settings → Setup, add OPENAI_API_KEY, then retry. Pipeline drafts still work via template — try **Process Conversation**.")
+                        # Auto-setup: fallback to offline template so it never looks broken
+                        from core.models.conversation import Conversation
+                        from core.generation.prompt import generate_drafts as _gd
+                        conv = Conversation(source="email", participants=[{"name":"Test","email":"t@test.com"}], raw_text=test_prompt, urgency="medium")
+                        drafts = _gd(conv, prospect_name="Test", use_llm=False)
+                        st.warning("LLM is offline (AIR_GAPPED + no Ollama) — auto-used offline template (no API key needed). Your pipeline already does this for every email.")
+                        for k,v in drafts.items(): st.code(f"{k}: {v[:280]}", language=None)
+                        st.caption("To enable LLM: `ollama run llama3.2:1b` OR in ⚙️ Settings → Setup uncheck AIR_GAPPED and add OPENAI_API_KEY. Then `Save` and retry.")
+                        # one-click auto-fix if OPENAI key already present
+                        try:
+                            from pathlib import Path
+                            has_key = bool((Path(__file__).parents[2]/".env").read_text().count("OPENAI_API_KEY=") and "OPENAI_API_KEY=••••" not in open(Path(__file__).parents[2]/".env").read())
+                        except: has_key=False
+                        if has_key:
+                            if st.button("🔓 Auto-fix: Disable AIR_GAPPED (cloud has key)", key="autofix_air"):
+                                try:
+                                    from dotenv import set_key
+                                    from pathlib import Path
+                                    set_key(str(Path(__file__).parents[2]/".env"), "AIR_GAPPED", "false")
+                                    from core.config import reload_settings
+                                    reload_settings()
+                                    st.success("Auto-fixed — AIR_GAPPED disabled. Click Generate again.")
+                                    st.rerun()
+                                except Exception as ex: st.error(str(ex))
                     else:
                         st.error(f"Generation failed: {e}")
-                    st.info("Tip: `Ollama Host` above must be reachable. Install: https://ollama.com — then `ollama pull llama3.2:1b`")
+                        st.info("Tip: `Ollama Host` above must be reachable. Install: https://ollama.com — then `ollama pull llama3.2:1b`")
     with c2:
         if st.button("🧪 Generate drafts (offline template)", key="llm_template"):
             from core.models.conversation import Conversation

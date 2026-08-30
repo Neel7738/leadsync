@@ -303,10 +303,10 @@ class LLMManager:
         }
 
     def _get_ollama_models(self) -> List[str]:
-        """Query Ollama for available models, ordered by intelligence."""
+        """Query Ollama for available models, ordered by intelligence. Real-time: 5s cache."""
         now = time.time()
-        # Cache for 60 seconds
-        if self._available_ollama_models is not None and (now - self._ollama_checked_at) < 60:
+        # Cache for 5 seconds — real-time auto-detection (was 60s)
+        if self._available_ollama_models is not None and (now - self._ollama_checked_at) < 5:
             return self._available_ollama_models
 
         try:
