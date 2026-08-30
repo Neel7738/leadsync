@@ -207,7 +207,7 @@ def _extract_entities_from_meeting_notes(notes: str) -> ExtractedEntity:
     else:
         sentiment = "neutral"
     
-    sentiment_score = round((pos_count - neg_count) / max(1, pos_count + neg_count + 1), 2)
+    sentiment_score = max(0.0, min(1.0, round((pos_count - neg_count) / max(1, pos_count + neg_count + 1) + 0.5, 2)))
     
     # Extract any dollar amounts
     deal_size = _extract_deal_size(notes)
